@@ -10,6 +10,7 @@ ApplicationWindow {
     minimumWidth: 880
     minimumHeight: 560
     title: "校园路由实验室"
+    flags: Qt.Window | Qt.FramelessWindowHint
     color: "#F2F5FB"
     font.family: "Microsoft YaHei UI"
 
@@ -117,6 +118,12 @@ ApplicationWindow {
         chooseNode(-1)
         selectedLinkId = -1
     }
+    function removeNodeById(id) {
+        canvas.commitNow()
+        if (canvas.linkStart === id) canvas.linkStart = -1
+        graphBackend.removeNode(id)
+        if (selectedNodeId === id) chooseNode(-1)
+    }
 
     Connections {
         target: graphBackend
@@ -145,13 +152,25 @@ ApplicationWindow {
         height: 84
         color: "#FFFFFF"
         Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: "#E7ECF4" }
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            onPressed: window.startSystemMove()
+            onDoubleClicked: {
+                if (window.visibility === Window.Maximized) window.showNormal()
+                else window.showMaximized()
+            }
+        }
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: 28; anchors.rightMargin: 28
             spacing: 12
-            Rectangle {
-                width: 48; height: 48; radius: 16; color: "#D7F3E9"
-                Text { anchors.centerIn: parent; text: "✦"; color: "#51A994"; font.pixelSize: 28 }
+            Image {
+                source: "qrc:/assets/app-icon.png"
+                sourceSize.width: 96; sourceSize.height: 96
+                Layout.preferredWidth: 48; Layout.preferredHeight: 48
+                Layout.maximumWidth: 48; Layout.maximumHeight: 48
+                fillMode: Image.PreserveAspectFit
             }
             Column {
                 Layout.leftMargin: 3
@@ -164,7 +183,50 @@ ApplicationWindow {
             SoftButton { text: "造价例题"; symbol: "◇"; onClicked: window.loadExample("cost") }
             SoftButton { text: "吞吐例题"; symbol: "↗"; onClicked: window.loadExample("flow") }
             Rectangle { width: 1; height: 32; color: "#E8EDF4"; Layout.leftMargin: 7; Layout.rightMargin: 7 }
-            Text { text: graphBackend.nodes.length + " 个节点  ·  " + graphBackend.links.length + " 条链路"; color: "#7F90A6"; font.pixelSize: 12 }
+            Text {
+                visible: window.width >= 1190
+                text: graphBackend.nodes.length + " 个节点  ·  " + graphBackend.links.length + " 条链路"
+                color: "#7F90A6"; font.pixelSize: 12
+            }
+            Row {
+                Layout.leftMargin: 4
+                spacing: 2
+                WindowControl { symbol: "−"; accessibleName: "最小化"; onClicked: window.showMinimized() }
+                WindowControl {
+                    symbol: window.visibility === Window.Maximized ? "❐" : "□"
+                    accessibleName: window.visibility === Window.Maximized ? "还原" : "最大化"
+                    onClicked: {
+                        if (window.visibility === Window.Maximized) window.showNormal()
+                        else window.showMaximized()
+                    }
+                }
+                WindowControl { symbol: "×"; accessibleName: "关闭"; destructive: true; onClicked: window.close() }
+            }
+        }
+    }
+
+    Menu {
+        id: nodeMenu
+        objectName: "nodeMenu"
+        property int nodeId: -1
+        popupType: Popup.Item
+        width: 142
+        background: Rectangle { radius: 12; color: "#FFFFFF"; border.color: "#E1E8F2" }
+        MenuItem {
+            id: deleteNodeAction
+            text: "删除节点"
+            implicitHeight: 44
+            leftPadding: 14; rightPadding: 12
+            background: Rectangle {
+                radius: 10
+                color: deleteNodeAction.highlighted ? "#FDEDEF" : "#FFFFFF"
+            }
+            contentItem: Row {
+                spacing: 9
+                Text { text: "×"; color: "#C96D78"; font.pixelSize: 20; anchors.verticalCenter: parent.verticalCenter }
+                Text { text: "删除节点"; color: "#40536E"; font.pixelSize: 13; font.family: "Microsoft YaHei UI"; anchors.verticalCenter: parent.verticalCenter }
+            }
+            onTriggered: window.removeNodeById(nodeMenu.nodeId)
         }
     }
 
@@ -247,17 +309,20 @@ ApplicationWindow {
                 flowPathFocus: window.highlightedFlowPath
                 onNodeSelected: id => window.chooseNode(id)
                 onLinkSelected: id => window.chooseLink(id)
+                onNodeContextRequested: (id, x, y) => {
+                    nodeMenu.nodeId = id
+                    nodeMenu.popup(canvas, Qt.point(x, y))
+                }
                 onPositionsSettled: positions => graphBackend.setPositions(positions)
                 onBlankClicked: (x, y) => {
                     canvas.commitNow()
                     const id = graphBackend.addNode(x, y)
                     if (id >= 0) window.chooseNode(id)
-                    window.activeTool = "select"
                 }
                 onLinkRequested: (fromId, toId) => {
                     canvas.commitNow()
                     const id = graphBackend.addLink(fromId, toId, 10, 15, false)
-                    if (id >= 0) { window.chooseLink(id); window.activeTool = "select" }
+                    if (id >= 0) window.chooseLink(id)
                     else window.notice = graphBackend.error
                 }
             }
@@ -502,4 +567,21 @@ ApplicationWindow {
             }
         }
     }
+
+    component ResizeGrip: MouseArea {
+        property int edges: 0
+        hoverEnabled: true
+        acceptedButtons: Qt.LeftButton
+        visible: window.visibility !== Window.Maximized
+        z: 100
+        onPressed: window.startSystemResize(edges)
+    }
+    ResizeGrip { x: 0; y: 8; width: 6; height: window.height - 16; edges: Qt.LeftEdge; cursorShape: Qt.SizeHorCursor }
+    ResizeGrip { x: window.width - 6; y: 8; width: 6; height: window.height - 16; edges: Qt.RightEdge; cursorShape: Qt.SizeHorCursor }
+    ResizeGrip { x: 8; y: 0; width: window.width - 16; height: 6; edges: Qt.TopEdge; cursorShape: Qt.SizeVerCursor }
+    ResizeGrip { x: 8; y: window.height - 6; width: window.width - 16; height: 6; edges: Qt.BottomEdge; cursorShape: Qt.SizeVerCursor }
+    ResizeGrip { x: 0; y: 0; width: 9; height: 9; edges: Qt.LeftEdge | Qt.TopEdge; cursorShape: Qt.SizeFDiagCursor }
+    ResizeGrip { x: window.width - 9; y: 0; width: 9; height: 9; edges: Qt.RightEdge | Qt.TopEdge; cursorShape: Qt.SizeBDiagCursor }
+    ResizeGrip { x: 0; y: window.height - 9; width: 9; height: 9; edges: Qt.LeftEdge | Qt.BottomEdge; cursorShape: Qt.SizeBDiagCursor }
+    ResizeGrip { x: window.width - 9; y: window.height - 9; width: 9; height: 9; edges: Qt.RightEdge | Qt.BottomEdge; cursorShape: Qt.SizeFDiagCursor }
 }

@@ -34,6 +34,7 @@ Item {
     signal linkSelected(int id)
     signal blankClicked(real x, real y)
     signal linkRequested(int fromId, int toId)
+    signal nodeContextRequested(int id, real x, real y)
     signal positionsSettled(var positions)
 
     readonly property real viewScale: Math.min((width - 36) / 940, (height - 36) / 610) * zoom
@@ -454,15 +455,16 @@ Item {
                 }
                 MouseArea {
                     anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
                     hoverEnabled: true
                     cursorShape: root.tool === "select" ? Qt.OpenHandCursor : Qt.PointingHandCursor
                     onEntered: root.hoveredNode = nodeBody.nodeId
                     onExited: root.hoveredNode = -1
-                    drag.target: root.tool === "select" ? nodeBody : null
+                    drag.target: root.tool === "select" && pressedButtons === Qt.LeftButton ? nodeBody : null
                     drag.minimumX: 8; drag.maximumX: 870
                     drag.minimumY: 8; drag.maximumY: 540
                     onPressed: {
-                        if (root.tool === "select") {
+                        if (mouse.button === Qt.LeftButton && root.tool === "select") {
                             root.nodeSelected(nodeBody.nodeId)
                         }
                     }
@@ -480,6 +482,13 @@ Item {
                         dynamics.start()
                     }
                     onClicked: {
+                        if (mouse.button === Qt.RightButton) {
+                            const point = mapToItem(root, mouse.x, mouse.y)
+                            root.nodeSelected(nodeBody.nodeId)
+                            root.nodeContextRequested(nodeBody.nodeId, point.x, point.y)
+                            return
+                        }
+                        if (mouse.button !== Qt.LeftButton) return
                         if (root.tool === "link") {
                             if (root.linkStart < 0) root.linkStart = nodeBody.nodeId
                             else if (root.linkStart !== nodeBody.nodeId) {

@@ -1,4 +1,5 @@
 #include <QGuiApplication>
+#include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -8,6 +9,7 @@
 
 int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
+    QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/assets/app-icon.png")));
     QQuickStyle::setStyle("Basic");
     GraphBackend backend;
     QQmlApplicationEngine engine;
@@ -40,6 +42,13 @@ int main(int argc, char *argv[]) {
                 window->setProperty("traceSteps", trace.value("steps"));
                 window->setProperty("stepIndex", trace.value("steps").toList().size() - 1);
                 window->setProperty("treeOnly", true);
+            } else if (state == QStringLiteral("context")) {
+                if (QObject *menu = window->findChild<QObject *>(QStringLiteral("nodeMenu"))) {
+                    menu->setProperty("nodeId", 4);
+                    menu->setProperty("x", 600);
+                    menu->setProperty("y", 300);
+                    QMetaObject::invokeMethod(menu, "open");
+                }
             }
         }
         const int widthOption = app.arguments().indexOf("--screenshot-width");

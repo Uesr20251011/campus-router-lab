@@ -80,6 +80,37 @@ private slots:
         QCOMPARE(saved.size(), 1);
     }
 
+    void rightClickNodeRequestsContextAction() {
+        QQuickView view;
+        prepare(view);
+        auto *root = view.rootObject();
+        QSignalSpy context(root, SIGNAL(nodeContextRequested(int,double,double)));
+        QVERIFY(context.isValid());
+
+        QTest::mouseClick(&view, Qt::RightButton, Qt::NoModifier, QPoint(218, 218));
+
+        QCOMPARE(context.size(), 1);
+        QCOMPARE(context.first().at(0).toInt(), 1);
+    }
+
+    void linkToolSupportsRepeatedConnections() {
+        QQuickView view;
+        prepare(view);
+        auto *root = view.rootObject();
+        root->setProperty("tool", "link");
+        QSignalSpy links(root, SIGNAL(linkRequested(int,int)));
+        QVERIFY(links.isValid());
+
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, QPoint(218, 218));
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, QPoint(418, 218));
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, QPoint(418, 218));
+        QTest::mouseClick(&view, Qt::LeftButton, Qt::NoModifier, QPoint(218, 218));
+
+        QCOMPARE(links.size(), 2);
+        QCOMPARE(root->property("tool").toString(), QStringLiteral("link"));
+        QCOMPARE(root->property("linkStart").toInt(), -1);
+    }
+
     void numericInputAcceptsDirectTyping() {
         QQuickView view;
         view.setResizeMode(QQuickView::SizeRootObjectToView);

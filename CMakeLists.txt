@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(CampusRouterLab VERSION 1.0.0 LANGUAGES CXX)
+project(CampusRouterLab VERSION 1.0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -15,7 +15,13 @@ add_library(router_core STATIC
 target_include_directories(router_core PUBLIC src)
 target_link_libraries(router_core PUBLIC Qt6::Core)
 
-qt_add_executable(campus_router src/main.cpp)
+set(app_sources src/main.cpp)
+if(WIN32)
+    list(APPEND app_sources assets/app.rc)
+endif()
+qt_add_executable(campus_router ${app_sources})
+set_target_properties(campus_router PROPERTIES WIN32_EXECUTABLE TRUE)
+qt_add_resources(campus_router "app_icons" PREFIX "/" FILES assets/app-icon.png)
 qt_add_qml_module(campus_router
     URI CampusRouter
     VERSION 1.0
@@ -24,6 +30,7 @@ qt_add_qml_module(campus_router
         qml/GraphCanvas.qml
         qml/SoftButton.qml
         qml/SoftSpinBox.qml
+        qml/WindowControl.qml
 )
 target_link_libraries(campus_router PRIVATE router_core Qt6::Quick Qt6::QuickControls2)
 
