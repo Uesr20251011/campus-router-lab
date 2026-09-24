@@ -1,0 +1,40 @@
+cmake_minimum_required(VERSION 3.21)
+project(CampusRouterLab VERSION 1.0.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
+
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Quick QuickControls2 Test)
+qt_standard_project_setup()
+
+add_library(router_core STATIC
+    src/GraphAlgorithms.cpp
+    src/GraphBackend.cpp
+)
+target_include_directories(router_core PUBLIC src)
+target_link_libraries(router_core PUBLIC Qt6::Core)
+
+qt_add_executable(campus_router src/main.cpp)
+qt_add_qml_module(campus_router
+    URI CampusRouter
+    VERSION 1.0
+    QML_FILES
+        qml/Main.qml
+        qml/GraphCanvas.qml
+        qml/SoftButton.qml
+        qml/SoftSpinBox.qml
+)
+target_link_libraries(campus_router PRIVATE router_core Qt6::Quick Qt6::QuickControls2)
+
+enable_testing()
+qt_add_executable(router_tests tests/tst_graph.cpp)
+target_link_libraries(router_tests PRIVATE router_core Qt6::Test)
+add_test(NAME router_tests COMMAND router_tests)
+
+qt_add_executable(canvas_tests tests/tst_canvas.cpp)
+target_link_libraries(canvas_tests PRIVATE Qt6::Quick Qt6::Test)
+target_compile_definitions(canvas_tests PRIVATE QML_CANVAS_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qml/GraphCanvas.qml")
+target_compile_definitions(canvas_tests PRIVATE QML_SPINBOX_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qml/SoftSpinBox.qml")
+add_test(NAME canvas_tests COMMAND canvas_tests)
+set_tests_properties(canvas_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")

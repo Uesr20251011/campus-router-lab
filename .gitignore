@@ -1,0 +1,8 @@
+/build/
+/build-ascii/
+/dist/
+*.user
+*.user.*
+*.log
+Thumbs.db
+.DS_Store
