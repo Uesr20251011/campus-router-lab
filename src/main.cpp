@@ -9,6 +9,8 @@
 
 int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
+    QGuiApplication::setOrganizationName(QStringLiteral("CampusRouterLab"));
+    QGuiApplication::setApplicationName(QStringLiteral("CampusRouter"));
     QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/assets/app-icon.png")));
     QQuickStyle::setStyle("Basic");
     GraphBackend backend;
@@ -49,6 +51,9 @@ int main(int argc, char *argv[]) {
                     menu->setProperty("y", 300);
                     QMetaObject::invokeMethod(menu, "open");
                 }
+            } else if (state == QStringLiteral("network")) {
+                if (QObject *popup = window->findChild<QObject *>(QStringLiteral("networkPopup")))
+                    QMetaObject::invokeMethod(popup, "open");
             }
         }
         const int widthOption = app.arguments().indexOf("--screenshot-width");

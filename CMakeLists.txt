@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(CampusRouterLab VERSION 1.0.4 LANGUAGES CXX)
+project(CampusRouterLab VERSION 1.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -32,6 +32,7 @@ qt_add_qml_module(campus_router
         qml/GraphCanvas.qml
         qml/SoftButton.qml
         qml/SoftSpinBox.qml
+        qml/SoftComboBox.qml
         qml/WindowControl.qml
 )
 target_link_libraries(campus_router PRIVATE router_core Qt6::Quick Qt6::QuickControls2)

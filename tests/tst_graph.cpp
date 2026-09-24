@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QTemporaryDir>
 
 #include "GraphAlgorithms.h"
 #include "GraphBackend.h"
@@ -14,6 +15,8 @@ private slots:
     void automaticLayoutAvoidsOverlapAndIsRepeatable();
     void flowTraceShowsSearchUpdatesAndReverseResidual();
     void finalFlowIsDecomposedIntoVisibleRoutes();
+    void savedPresetRestoresEditedNetwork();
+    void randomNetworkStaysConnected();
 };
 
 void GraphTests::figure2HasMinimumCost41() {
@@ -63,6 +66,41 @@ void GraphTests::editingNodeAndLinkChangesGraph() {
     QVERIFY(backend.removeNode(1));
     QVERIFY(!backend.hasNode(1));
     QVERIFY(!backend.hasIncidentLink(1));
+}
+
+void GraphTests::savedPresetRestoresEditedNetwork() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString file = directory.filePath(QStringLiteral("presets.json"));
+    GraphBackend first(nullptr, file);
+    first.loadFlowSample();
+    QVERIFY(first.renameNode(1, QStringLiteral("教学楼入口")));
+    QVERIFY(first.moveNode(1, 123.5, 210.25));
+    QVERIFY(first.updateLink(1, 19, 27, true));
+    QVERIFY(first.savePreset(QStringLiteral("我的流量图")));
+
+    GraphBackend restored(nullptr, file);
+    QVERIFY(restored.presetNames().contains(QStringLiteral("我的流量图")));
+    QVERIFY(restored.loadPreset(QStringLiteral("我的流量图")));
+    QCOMPARE(restored.nodeName(1), QStringLiteral("教学楼入口"));
+    QCOMPARE(restored.linkCost(1), qint64(19));
+    QCOMPARE(restored.linkCapacity(1), qint64(27));
+    QCOMPARE(restored.links().first().toMap().value("directed").toBool(), true);
+    QCOMPARE(restored.nodes().first().toMap().value("x").toDouble(), 123.5);
+    QCOMPARE(restored.nodes().first().toMap().value("y").toDouble(), 210.25);
+    QCOMPARE(restored.run(QStringLiteral("flow"), 1, 8).value("success").toBool(), true);
+}
+
+void GraphTests::randomNetworkStaysConnected() {
+    GraphBackend backend;
+    backend.generateRandom(20);
+    QCOMPARE(backend.nodes().size(), 20);
+    QVERIFY(backend.links().size() >= 19);
+    QVERIFY(backend.run(QStringLiteral("kruskal")).value("success").toBool());
+    const QVariantList first = backend.links();
+    backend.generateRandom(20);
+    QVERIFY(backend.links() != first);
+    QVERIFY(backend.run(QStringLiteral("kruskal")).value("success").toBool());
 }
 
 void GraphTests::automaticLayoutAvoidsOverlapAndIsRepeatable() {

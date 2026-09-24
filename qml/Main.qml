@@ -90,16 +90,72 @@ ApplicationWindow {
     }
     function loadExample(which) {
         canvas.commitNow()
-        routerCount.commitInput()
         treeOnly = false
         chooseNode(-1)
         selectedLinkId = -1
-        if (which === "cost") { graphBackend.loadCostSample(); sinkBox.value = 8; metric = "cost" }
-        else if (which === "flow") { graphBackend.loadFlowSample(); sinkBox.value = 8; metric = "capacity" }
-        else { graphBackend.generateCampus(routerCount.value); sinkBox.value = routerCount.value; metric = "cost" }
-        sourceBox.value = 1
+        canvas.linkStart = -1
+        if (which === "cost") { graphBackend.loadCostSample(); metric = "cost" }
+        else if (which === "flow") { graphBackend.loadFlowSample(); metric = "capacity" }
+        else { graphBackend.generateCampus(20); metric = "cost" }
+        const nodes = graphBackend.nodes
+        sourceBox.value = nodes.length ? nodes[0].id : 1
+        sinkBox.value = nodes.length ? nodes[nodes.length - 1].id : 1
         canvas.fitView()
         notice = ""
+    }
+    function presetChoices() {
+        const choices = ["校园网络 · 内置", "造价例题 · 内置", "吞吐例题 · 内置"]
+        const names = graphBackend.presetNames
+        for (let i = 0; i < names.length; ++i) choices.push("我的预设 · " + names[i])
+        return choices
+    }
+    function loadChosenPreset() {
+        const index = presetBox.currentIndex
+        if (index < 0) return
+        if (index < 3) {
+            loadExample(["campus", "cost", "flow"][index])
+        } else {
+            canvas.commitNow()
+            const names = graphBackend.presetNames
+            if (index - 3 >= names.length || !graphBackend.loadPreset(names[index - 3])) {
+                notice = graphBackend.error
+                return
+            }
+            chooseNode(-1)
+            selectedLinkId = -1
+            canvas.linkStart = -1
+            metric = "cost"
+            const nodes = graphBackend.nodes
+            sourceBox.value = nodes.length ? nodes[0].id : 1
+            sinkBox.value = nodes.length ? nodes[nodes.length - 1].id : 1
+            canvas.fitView()
+            notice = "已载入预设：『" + names[index - 3] + "』"
+        }
+        networkPopup.close()
+    }
+    function generateRandomNetwork() {
+        randomCount.commitInput()
+        canvas.commitNow()
+        graphBackend.generateRandom(randomCount.value)
+        if (graphBackend.error.length > 0) { notice = graphBackend.error; return }
+        chooseNode(-1)
+        selectedLinkId = -1
+        canvas.linkStart = -1
+        metric = "cost"
+        sourceBox.value = 1
+        sinkBox.value = randomCount.value
+        canvas.fitView()
+        notice = "已生成 " + randomCount.value + " 个节点的随机网络"
+        networkPopup.close()
+    }
+    function saveCurrentPreset() {
+        canvas.commitNow()
+        const name = presetNameInput.text.trim()
+        if (!graphBackend.savePreset(name)) { notice = graphBackend.error; return }
+        const names = graphBackend.presetNames
+        presetBox.currentIndex = 3 + names.indexOf(name)
+        notice = "已保存预设：『" + name + "』"
+        savePresetPopup.close()
     }
     function applyLink() {
         const cost = Number(costField.text), capacity = Number(capacityField.text)
@@ -179,9 +235,12 @@ ApplicationWindow {
                 Text { text: "让每一条路径都看得见"; color: "#91A0B5"; font.pixelSize: 11 }
             }
             Item { Layout.fillWidth: true }
-            SoftButton { text: "校园网络"; symbol: "◌"; selected: !window.activeAlgorithm && graphBackend.nodes.length >= 20; onClicked: window.loadExample("campus") }
-            SoftButton { text: "造价例题"; symbol: "◇"; onClicked: window.loadExample("cost") }
-            SoftButton { text: "吞吐例题"; symbol: "↗"; onClicked: window.loadExample("flow") }
+            SoftButton {
+                id: networkButton
+                text: "网络管理"; symbol: "◌"
+                selected: networkPopup.visible
+                onClicked: networkPopup.visible ? networkPopup.close() : networkPopup.open()
+            }
             Rectangle { width: 1; height: 32; color: "#E8EDF4"; Layout.leftMargin: 7; Layout.rightMargin: 7 }
             Text {
                 visible: window.width >= 1190
@@ -201,6 +260,75 @@ ApplicationWindow {
                     }
                 }
                 WindowControl { symbol: "×"; accessibleName: "关闭"; destructive: true; onClicked: window.close() }
+            }
+        }
+    }
+
+    Popup {
+        id: networkPopup
+        objectName: "networkPopup"
+        parent: Overlay.overlay
+        x: Math.min(window.width - width - 16,
+                    networkButton.mapToItem(window.contentItem, 0, 0).x)
+        y: header.height - 3
+        width: 270; height: 276
+        padding: 14
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle {
+            radius: 18; color: "#FFFFFF"; border.color: "#E0E8F3"
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 8
+            Text { text: "网络"; color: "#344862"; font.pixelSize: 15; font.weight: Font.DemiBold }
+            Text { text: "内置例题和已保存的网络"; color: "#94A2B5"; font.pixelSize: 11 }
+            SoftComboBox { id: presetBox; model: window.presetChoices(); Layout.fillWidth: true }
+            RowLayout {
+                Layout.fillWidth: true; spacing: 7
+                SoftButton { text: "载入所选"; compact: true; Layout.fillWidth: true; onClicked: window.loadChosenPreset() }
+                SoftButton { text: "保存当前"; compact: true; Layout.fillWidth: true; onClicked: { networkPopup.close(); savePresetPopup.open() } }
+            }
+            Rectangle { Layout.fillWidth: true; height: 1; color: "#EBEFF6"; Layout.topMargin: 4; Layout.bottomMargin: 3 }
+            Text { text: "随机网络 · 节点数"; color: "#344862"; font.pixelSize: 12; font.weight: Font.DemiBold }
+            RowLayout {
+                Layout.fillWidth: true; spacing: 7
+                SoftSpinBox { id: randomCount; from: 2; to: 200; value: 20; Layout.fillWidth: true }
+                SoftButton { text: "生成"; compact: true; onClicked: window.generateRandomNetwork() }
+            }
+            Text { text: "预设会保存在本机，下次启动仍可使用"; color: "#9AA9BB"; font.pixelSize: 10 }
+        }
+    }
+
+    Popup {
+        id: savePresetPopup
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: 340; height: 198
+        padding: 20
+        modal: true; dim: true; focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        Overlay.modal: Rectangle { color: "#550E2035" }
+        background: Rectangle { radius: 20; color: "#FFFFFF"; border.color: "#E0E8F3" }
+        onOpened: { presetNameInput.text = ""; window.notice = ""; presetNameInput.forceActiveFocus() }
+        ColumnLayout {
+            anchors.fill: parent; spacing: 10
+            Text { text: "保存当前网络"; color: "#344862"; font.pixelSize: 16; font.weight: Font.DemiBold }
+            Text { text: "节点名称、位置、链路和权值都会保存"; color: "#91A0B5"; font.pixelSize: 11 }
+            TextField {
+                id: presetNameInput
+                Layout.fillWidth: true; implicitHeight: 40
+                placeholderText: "输入预设名称"
+                maximumLength: 32
+                selectByMouse: true
+                onAccepted: window.saveCurrentPreset()
+                background: Rectangle { radius: 11; color: "#FFFFFF"; border.color: presetNameInput.activeFocus ? "#79BFAE" : "#DDE6F2" }
+            }
+            Text { visible: window.notice.length > 0; text: window.notice; color: "#C37D7F"; font.pixelSize: 11 }
+            RowLayout {
+                Layout.fillWidth: true; spacing: 8
+                Item { Layout.fillWidth: true }
+                SoftButton { text: "取消"; compact: true; onClicked: savePresetPopup.close() }
+                SoftButton { text: "保存"; compact: true; selected: true; onClicked: window.saveCurrentPreset() }
             }
         }
     }
@@ -260,13 +388,6 @@ ApplicationWindow {
                 SoftButton { Layout.fillWidth: true; text: "固定节点模式"; symbol: "▣"; selected: window.fixedNodes; accent: "#DCD4F9"; onClicked: window.fixedNodes = !window.fixedNodes }
                 SoftButton { Layout.fillWidth: true; text: "自动整理"; symbol: "◎"; enabled: !window.fixedNodes; opacity: enabled ? 1 : 0.48; onClicked: { canvas.commitNow(); graphBackend.autoLayout(); canvas.fitView() } }
                 Rectangle { Layout.fillWidth: true; height: 1; color: "#EBEFF6"; Layout.topMargin: 11; Layout.bottomMargin: 8 }
-                Text { text: "网络规模"; color: "#344862"; font.pixelSize: 15; font.weight: Font.DemiBold }
-                RowLayout {
-                    Layout.fillWidth: true
-                    SoftSpinBox { id: routerCount; from: 2; to: 200; value: 20; Layout.fillWidth: true }
-                    SoftButton { text: "生成"; compact: true; onClicked: window.loadExample("campus") }
-                }
-                Rectangle { Layout.fillWidth: true; height: 1; color: "#EBEFF6"; Layout.topMargin: 10; Layout.bottomMargin: 8 }
                 Text { text: "算法演示"; color: "#344862"; font.pixelSize: 15; font.weight: Font.DemiBold }
                 Text { text: "再次点击当前算法可退出演示"; color: "#94A2B5"; font.pixelSize: 11 }
                 SoftButton { Layout.fillWidth: true; text: "Prim 最小生成树"; symbol: "✳"; selected: window.activeAlgorithm === "prim"; accent: "#BDEAD9"; onClicked: window.runAlgorithm("prim") }

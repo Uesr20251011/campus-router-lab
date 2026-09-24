@@ -319,8 +319,6 @@ Item {
                     ctx.setLineDash(rejected ? [7, 6] : [])
                     ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke(); ctx.setLineDash([])
                     if (link.directed) {
-                        arrow(ctx, sx + (ex - sx) * 0.72, sy + (ey - sy) * 0.72,
-                              ux, uy, 20, tone)
                         arrow(ctx, ex - ux * 5, ey - uy * 5, ux, uy, 13, tone)
                     }
                     ctx.globalAlpha = 1
@@ -343,9 +341,9 @@ Item {
                             ctx.strokeStyle = color; ctx.lineWidth = 5; ctx.lineCap = "round"
                             ctx.beginPath(); ctx.moveTo(fromX, fromY); ctx.lineTo(toX, toY); ctx.stroke()
                             const direction = route.forward ? 1 : -1
-                            arrow(ctx, fromX + (toX - fromX) * 0.72,
-                                  fromY + (toY - fromY) * 0.72,
-                                  ux * direction, uy * direction, 18, color)
+                            arrow(ctx, toX - ux * direction * 5,
+                                  toY - uy * direction * 5,
+                                  ux * direction, uy * direction, 13, color)
                         }
                         ctx.globalAlpha = 1
                     }
