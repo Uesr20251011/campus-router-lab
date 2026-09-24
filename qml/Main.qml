@@ -267,10 +267,9 @@ ApplicationWindow {
     Popup {
         id: networkPopup
         objectName: "networkPopup"
-        parent: Overlay.overlay
-        x: Math.min(window.width - width - 16,
-                    networkButton.mapToItem(window.contentItem, 0, 0).x)
-        y: header.height - 3
+        parent: networkButton
+        x: 0
+        y: networkButton.height + 10
         width: 270; height: 276
         padding: 14
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside

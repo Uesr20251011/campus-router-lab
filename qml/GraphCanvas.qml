@@ -322,8 +322,8 @@ Item {
                         arrow(ctx, ex - ux * 5, ey - uy * 5, ux, uy, 13, tone)
                     }
                     ctx.globalAlpha = 1
+                    const routes = []
                     if (flowFinal && root.step.flowPaths) {
-                        const routes = []
                         for (let pathIndex = 0; pathIndex < root.step.flowPaths.length; ++pathIndex) {
                             const route = root.step.flowPaths[pathIndex]
                             const segment = route.linkIds.indexOf(link.id)
@@ -349,8 +349,8 @@ Item {
                     }
                     const movingLargeGraph = root.draggedNode >= 0 && root.nodes.length > 60
                     const showLabel = flowFinal ? (flow !== 0 || selected || hovered)
-                                    : movingLargeGraph ? (selected || active || onPath)
-                                                       : root.showAllWeights || root.links.length <= 16 || selected || hovered || active || chosen || onPath
+                                    : movingLargeGraph ? (selected || active || onPath || reverseRoute)
+                                                       : root.showAllWeights || root.links.length <= 16 || selected || hovered || active || chosen || onPath || reverseRoute
                     if (!showLabel) continue
                     const label = root.metric === "cost" ? (link.hasCost ? "¥ " + link.cost : "—")
                                   : (link.hasCapacity ? (flowMode
@@ -391,11 +391,46 @@ Item {
                     }
                     root.labelSlots[link.id] = bestSlot
                     placedLabels.push({x: mx, y: my, width: labelWidth})
-                    ctx.globalAlpha = exhausted && !flowFinal ? 0.48 : 1
-                    ctx.fillStyle = "#FFFFFF"; ctx.strokeStyle = "#E7EBF3"; ctx.lineWidth = 1
+                    let labelFill = "#FFFFFF", labelStroke = "#E7EBF3", labelInk = "#60738D"
+                    let labelBorder = 1
+                    if (flowFinal && flow !== 0) {
+                        const focusedRoute = routes.find(route => route.index === root.flowPathFocus) || routes[0]
+                        const routeColor = focusedRoute ? root.flowColor(focusedRoute.index) : "#36AA99"
+                        labelFill = "#F5F8FC"; labelStroke = routeColor; labelInk = routeColor; labelBorder = 2
+                    } else if (exhausted) {
+                        labelFill = "#F0F2F6"; labelStroke = "#D2D9E4"; labelInk = "#8C98AA"
+                    }
+                    if (chosen) {
+                        labelFill = "#E7F8F2"; labelStroke = "#68C1AC"; labelInk = "#268B79"; labelBorder = 2
+                    }
+                    if (rejected) {
+                        labelFill = "#FDECF0"; labelStroke = "#E693A4"; labelInk = "#A8546A"; labelBorder = 2
+                    }
+                    if (active) {
+                        labelFill = "#FFF0DE"; labelStroke = "#F0B477"; labelInk = "#A36A30"; labelBorder = 2
+                    }
+                    if (onPath) {
+                        const searching = root.step.kind === "search"
+                        labelFill = searching ? "#FFF0DE" : "#E3F7F0"
+                        labelStroke = searching ? "#EAA668" : "#50BDA7"
+                        labelInk = searching ? "#A36A30" : "#268B79"
+                        labelBorder = 2
+                    }
+                    if (reverseRoute) {
+                        labelFill = "#F1ECFF"; labelStroke = "#9B84E3"; labelInk = "#7356C5"; labelBorder = 2
+                    }
+                    if (selected) {
+                        labelFill = "#EFEAFF"; labelStroke = "#7A66D8"; labelInk = "#6650B6"; labelBorder = 2
+                    } else if (hovered && !chosen && !onPath && !reverseRoute && !active && !rejected) {
+                        labelFill = "#EAF3FC"; labelStroke = "#8CB1D6"; labelInk = "#507DAA"; labelBorder = 2
+                    }
+                    const routeInFocus = routes.some(route => route.index === root.flowPathFocus)
+                    ctx.globalAlpha = flowFinal && root.flowPathFocus >= 0 && !routeInFocus && !selected && !hovered
+                        ? 0.28 : exhausted && !flowFinal && !reverseRoute ? 0.56 : 1
+                    ctx.fillStyle = labelFill; ctx.strokeStyle = labelStroke; ctx.lineWidth = labelBorder
                     pill(ctx, mx - labelWidth / 2, my - 13, labelWidth, 26, 10)
                     ctx.fill(); ctx.stroke()
-                    ctx.fillStyle = "#60738D"; ctx.textAlign = "center"; ctx.textBaseline = "middle"
+                    ctx.fillStyle = labelInk; ctx.textAlign = "center"; ctx.textBaseline = "middle"
                     ctx.fillText(label, mx, my + 0.5)
                     ctx.globalAlpha = 1
                 }
