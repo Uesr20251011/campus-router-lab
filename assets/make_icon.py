@@ -4,16 +4,14 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 HERE = Path(__file__).resolve().parent
-BACKGROUND = "#F0F2F6"
-DISTANT_BRANCH = "#3B817D"
+BACKGROUND = "#FFF3E6"
 SVG = f"""<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
   <rect x="8" y="8" width="240" height="240" rx="58" fill="{BACKGROUND}"/>
-  <path d="M65 177 115 101" fill="none" stroke="#4DAE9B" stroke-width="17" stroke-linecap="round"/>
-  <path d="M115 101 190 67" fill="none" stroke="{DISTANT_BRANCH}" stroke-width="12" stroke-linecap="round"/>
+  <path d="M65 177 115 101 190 67" fill="none" stroke="#4DAE9B" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M115 101 190 178" fill="none" stroke="#9B8BDD" stroke-width="14" stroke-linecap="round"/>
   <circle cx="65" cy="177" r="21" fill="#FFFFFF" stroke="#4DAE9B" stroke-width="10"/>
   <circle cx="115" cy="101" r="24" fill="#FFFFFF" stroke="#4DAE9B" stroke-width="10"/>
-  <circle cx="190" cy="67" r="15" fill="#FFFFFF" stroke="{DISTANT_BRANCH}" stroke-width="8"/>
+  <circle cx="190" cy="67" r="19" fill="#FFFFFF" stroke="#4DAE9B" stroke-width="10"/>
   <circle cx="190" cy="178" r="21" fill="#FFFFFF" stroke="#9B8BDD" stroke-width="10"/>
 </svg>
 """
@@ -28,19 +26,16 @@ def render(size):
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     draw.rounded_rectangle(point((8, 8, 248, 248), factor), radius=round(58 * factor), fill=BACKGROUND)
-    draw.line([point(p, factor) for p in ((65, 177), (115, 101))],
-              fill="#4DAE9B", width=round(17 * factor))
-    draw.line([point(p, factor) for p in ((115, 101), (190, 67))],
-              fill=DISTANT_BRANCH, width=round(12 * factor))
+    draw.line([point(p, factor) for p in ((65, 177), (115, 101), (190, 67))],
+              fill="#4DAE9B", width=round(17 * factor), joint="curve")
     draw.line([point(p, factor) for p in ((115, 101), (190, 178))],
               fill="#9B8BDD", width=round(14 * factor))
     for x, y, radius, color in ((65, 177, 21, "#4DAE9B"),
                                 (115, 101, 24, "#4DAE9B"),
-                                (190, 67, 15, DISTANT_BRANCH),
+                                (190, 67, 19, "#4DAE9B"),
                                 (190, 178, 21, "#9B8BDD")):
         bounds = point((x-radius, y-radius, x+radius, y+radius), factor)
-        stroke = 8 if x == 190 and y == 67 else 10
-        draw.ellipse(bounds, fill="white", outline=color, width=round(stroke * factor))
+        draw.ellipse(bounds, fill="white", outline=color, width=round(10 * factor))
     return image
 
 

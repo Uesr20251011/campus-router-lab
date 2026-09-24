@@ -6,7 +6,7 @@
 
 ## Windows 双击版
 
-从 GitHub Releases 下载 `CampusRouter-v1.0.2-Windows.zip`，解压后双击其中的 `CampusRouter.exe`，无须安装 Qt 或打开 Qt Creator。程序静默启动，不会弹出控制台。Qt 运行库放在 exe 旁边，因此要保留整个解压文件夹。
+从 GitHub Releases 下载 `CampusRouter-v1.0.3-Windows.zip`，解压后双击其中的 `CampusRouter.exe`，无须安装 Qt 或打开 Qt Creator。程序静默启动，不会弹出控制台。Qt 运行库放在 exe 旁边，因此要保留整个解压文件夹。
 
 源码可在 Qt Creator 中打开 `CMakeLists.txt`，使用 Qt 6.11.2 MinGW 64-bit 套件构建。`package.ps1` 是 Windows 打包脚本；在其他电脑上使用前，需要把脚本开头的 Qt、MinGW 和 CMake 路径调整为本机安装位置。
 
