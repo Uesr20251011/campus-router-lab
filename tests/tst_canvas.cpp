@@ -39,6 +39,35 @@ private:
     }
 
 private slots:
+    void weightToggleControlsIdleLabels() {
+        QQuickView view;
+        prepare(view);
+        auto *root = view.rootObject();
+        QVariant visible;
+        const QVariant idle = QVariantMap{{"flowFinal", false}, {"movingLargeGraph", false},
+                                          {"flow", 0}, {"selected", false}, {"hovered", false},
+                                          {"active", false}, {"chosen", false}, {"onPath", false},
+                                          {"reverseRoute", false}};
+        auto labelVisible = [&](const QVariant &state) {
+            return QMetaObject::invokeMethod(root, "shouldShowWeightLabel",
+                                             Q_RETURN_ARG(QVariant, visible), Q_ARG(QVariant, state));
+        };
+        QVERIFY(labelVisible(idle));
+        QVERIFY(!visible.toBool());
+        root->setProperty("showAllWeights", true);
+        QVERIFY(labelVisible(idle));
+        QVERIFY(visible.toBool());
+        root->setProperty("showAllWeights", false);
+        QVariantMap focused = idle.toMap();
+        focused["hovered"] = true;
+        QVERIFY(labelVisible(focused));
+        QVERIFY(visible.toBool());
+        focused["hovered"] = false;
+        focused["active"] = true;
+        QVERIFY(labelVisible(focused));
+        QVERIFY(visible.toBool());
+    }
+
     void clickDoesNotStartForceLayout() {
         QQuickView view;
         prepare(view);
@@ -59,6 +88,7 @@ private slots:
         prepare(view);
         auto *root = view.rootObject();
         root->setProperty("fixedNodes", true);
+        root->setProperty("showAllWeights", true);
         const QPointF first = node(root, 1)->position();
         const QPointF second = node(root, 2)->position();
         QTRY_VERIFY(root->property("labelSlots").toMap().contains("1"));

@@ -280,7 +280,7 @@ ApplicationWindow {
             Text { text: "视图"; color: "#8292A7"; font.pixelSize: 11; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
             ToolIconButton { symbol: "¥"; hint: "显示建设造价"; selected: window.metric === "cost"; onClicked: window.metric = "cost" }
             ToolIconButton { symbol: "◫"; hint: "显示传输容量"; selected: window.metric === "capacity"; accent: "#E9E3FB"; onClicked: window.metric = "capacity" }
-            ToolIconButton { symbol: "⊞"; hint: "显示或隐藏全部边权"; selected: canvas.showAllWeights; onClicked: canvas.showAllWeights = !canvas.showAllWeights }
+            ToolIconButton { symbol: "⊞"; hint: canvas.showAllWeights ? "隐藏全部边权" : "显示全部边权"; selected: canvas.showAllWeights; onClicked: canvas.showAllWeights = !canvas.showAllWeights }
         }
         Row {
             id: headerActions

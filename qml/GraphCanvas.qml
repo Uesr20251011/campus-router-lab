@@ -52,6 +52,12 @@ Item {
         return item ? Qt.point(item.x + 31, item.y + 31) : Qt.point(0, 0)
     }
     function has(list, value) { return !!list && list.indexOf(value) >= 0 }
+    function shouldShowWeightLabel(state) {
+        if (state.flowFinal) return state.flow !== 0 || state.selected || state.hovered
+        if (state.movingLargeGraph) return state.selected || state.active || state.onPath || state.reverseRoute
+        return showAllWeights || state.selected || state.hovered || state.active
+               || state.chosen || state.onPath || state.reverseRoute
+    }
     function linkById(id) {
         for (let i = 0; i < links.length; ++i) if (links[i].id === id) return links[i]
         return null
@@ -351,9 +357,9 @@ Item {
                         ctx.globalAlpha = 1
                     }
                     const movingLargeGraph = root.draggedNode >= 0 && root.nodes.length > 60
-                    const showLabel = flowFinal ? (flow !== 0 || selected || hovered)
-                                    : movingLargeGraph ? (selected || active || onPath || reverseRoute)
-                                                       : root.showAllWeights || root.links.length <= 16 || selected || hovered || active || chosen || onPath || reverseRoute
+                    const showLabel = root.shouldShowWeightLabel({flowFinal, flow, movingLargeGraph,
+                                                                  selected, hovered, active, chosen,
+                                                                  onPath, reverseRoute})
                     if (!showLabel) continue
                     const label = root.metric === "cost" ? (link.hasCost ? "¥ " + link.cost : "—")
                                   : (link.hasCapacity ? (flowMode

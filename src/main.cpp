@@ -54,6 +54,11 @@ int main(int argc, char *argv[]) {
                         index = i; break;
                     }
                 window->setProperty("stepIndex", state == QStringLiteral("dijkstra-finish") ? steps.size() - 1 : index);
+            } else if (state == QStringLiteral("cost") || state == QStringLiteral("cost-weights")) {
+                backend.loadCostSample();
+                if (state == QStringLiteral("cost-weights"))
+                    if (QObject *canvas = window->findChild<QObject *>(QStringLiteral("graphCanvas")))
+                        canvas->setProperty("showAllWeights", true);
             } else if (state == QStringLiteral("tree")) {
                 backend.loadCostSample();
                 const QVariantMap trace = backend.run(QStringLiteral("prim"), 1, 8);
