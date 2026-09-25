@@ -78,6 +78,8 @@ int main(int argc, char *argv[]) {
                     QMetaObject::invokeMethod(popup, "open");
             } else if (state == QStringLiteral("selection")) {
                 window->setProperty("selectedNodeId", 4);
+            } else if (state == QStringLiteral("property")) {
+                window->setProperty("propertyPanePinned", true);
             }
         }
         const int widthOption = app.arguments().indexOf("--screenshot-width");

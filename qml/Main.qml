@@ -26,6 +26,7 @@ ApplicationWindow {
     property int selectedNodeId: -1
     property int selectedLinkId: -1
     property string notice: ""
+    property bool propertyPanePinned: false
     property bool inspectorOpen: false
     property string inspectorTab: "demo"
     readonly property bool hasSelection: selectedNodeId >= 0 || selectedLinkId >= 0
@@ -40,6 +41,7 @@ ApplicationWindow {
     readonly property bool showFlowResult: flowFinished && showingDemo
     readonly property bool shortestFinished: activeAlgorithm === "dijkstra" && currentStep.kind === "finish"
     onHasSelectionChanged: updateInspector()
+    onPropertyPanePinnedChanged: updateInspector()
     onActiveAlgorithmChanged: updateInspector()
     onNoticeChanged: if (notice.length > 0) noticeTimer.restart()
     onStepIndexChanged: {
@@ -56,16 +58,12 @@ ApplicationWindow {
         highlightedFlowPath = -1
     }
     function updateInspector() {
-        if (hasSelection) {
-            inspectorCloseTimer.stop()
+        if (propertyPanePinned) {
             inspectorOpen = true
-            inspectorTab = "property"
-        } else if (activeAlgorithm.length > 0) {
-            inspectorCloseTimer.stop()
-            inspectorOpen = true
-            inspectorTab = "demo"
+            inspectorTab = hasSelection ? "property" : activeAlgorithm.length > 0 ? "demo" : "property"
         } else {
-            inspectorCloseTimer.restart()
+            inspectorOpen = activeAlgorithm.length > 0
+            inspectorTab = "demo"
         }
     }
     function exitDemo() {
@@ -80,13 +78,13 @@ ApplicationWindow {
         selectedLinkId = -1
         if (id >= 0) {
             nodeNameField.text = graphBackend.nodeName(id)
-            inspectorTab = "property"
+            if (propertyPanePinned) inspectorTab = "property"
         } else if (activeAlgorithm.length > 0) inspectorTab = "demo"
     }
     function chooseLink(id) {
         selectedLinkId = id
         selectedNodeId = -1
-        if (id >= 0) inspectorTab = "property"
+        if (id >= 0 && propertyPanePinned) inspectorTab = "property"
         else if (activeAlgorithm.length > 0) inspectorTab = "demo"
         const link = selectedLinkData()
         if (link) {
@@ -219,11 +217,6 @@ ApplicationWindow {
         onTriggered: window.notice = ""
     }
     Timer {
-        id: inspectorCloseTimer
-        interval: 500
-        onTriggered: if (!window.hasSelection && window.activeAlgorithm.length === 0) window.inspectorOpen = false
-    }
-    Timer {
         interval: {
             const base = speedBox.currentIndex === 0 ? 1600 : speedBox.currentIndex === 2 ? 500 : 1050
             return (window.currentStep.kind === "path" || window.currentStep.kind === "update")
@@ -266,6 +259,9 @@ ApplicationWindow {
             ToolIconButton { symbol: "⌖"; hint: "选择与拖动 · Esc 返回此工具"; selected: window.activeTool === "select"; onClicked: window.activeTool = "select" }
             ToolIconButton { symbol: "＋"; hint: "添加节点 · 点击画布连续添加"; selected: window.activeTool === "node"; onClicked: window.activeTool = "node" }
             ToolIconButton { symbol: "↗"; hint: "连接节点 · 依次点击两个节点"; selected: window.activeTool === "link"; onClicked: window.activeTool = "link" }
+            Rectangle { width: 1; height: 25; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "属性"; color: "#8292A7"; font.pixelSize: 11; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
+            ToolIconButton { objectName: "propertyPanelTool"; symbol: "✎"; hint: window.propertyPanePinned ? "结束属性编辑" : "编辑属性 · 展开右侧属性栏并保持"; selected: window.propertyPanePinned; onClicked: window.propertyPanePinned = !window.propertyPanePinned }
             Rectangle { width: 1; height: 25; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
             Row {
                 id: layoutTools
@@ -542,19 +538,20 @@ ApplicationWindow {
                 width: parent.width
                 spacing: 11
                 Text {
-                    text: window.showingProperty ? "属性编辑" : window.showFlowResult ? "最大流结果"
+                    text: window.propertyPanePinned && window.inspectorTab === "property" ? "属性编辑" : window.showFlowResult ? "最大流结果"
                           : window.shortestFinished ? "最短路径结果" : "算法演示"
                     color: "#344862"; font.pixelSize: 16; font.weight: Font.DemiBold
                 }
                 Text {
-                    text: window.showingProperty ? "修改选中节点或链路" : window.showFlowResult
+                    text: window.propertyPanePinned && window.inspectorTab === "property"
+                          ? (window.hasSelection ? "修改选中节点或链路" : "选择节点或链路修改属性") : window.showFlowResult
                           ? "总流量 " + window.currentStep.value + " 包/秒"
                           : window.shortestFinished ? "总造价 " + window.currentStep.value
                           : "跟随步骤查看算法过程"
                     color: window.showFlowResult || window.shortestFinished ? "#45A996" : "#94A2B5"; font.pixelSize: 12
                 }
                 RowLayout {
-                    visible: window.hasSelection && window.activeAlgorithm.length > 0
+                    visible: window.propertyPanePinned && window.hasSelection && window.activeAlgorithm.length > 0
                     Layout.fillWidth: true; spacing: 7
                     SoftButton { text: "属性"; compact: true; Layout.fillWidth: true; selected: window.inspectorTab === "property"; onClicked: window.inspectorTab = "property" }
                     SoftButton { text: "演示"; compact: true; Layout.fillWidth: true; selected: window.inspectorTab === "demo"; onClicked: window.inspectorTab = "demo" }

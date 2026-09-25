@@ -10,6 +10,43 @@ class LayoutTests : public QObject {
     Q_OBJECT
 
 private slots:
+    void draggingNodeKeepsPropertyPaneClosed() {
+        GraphBackend backend;
+        backend.loadCostSample();
+        QQmlApplicationEngine engine;
+        engine.rootContext()->setContextProperty("graphBackend", &backend);
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(QML_MAIN_PATH)));
+        QVERIFY2(!engine.rootObjects().isEmpty(), "Main.qml did not load");
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        window->setWidth(1200);
+        QTRY_VERIFY(window->isExposed());
+        auto *card = window->findChild<QQuickItem *>("canvasCard");
+        auto *canvas = window->findChild<QQuickItem *>("graphCanvas");
+        QVERIFY(card && canvas);
+        QTRY_VERIFY(qAbs(card->width() - (window->width() - 32)) < 0.1);
+        QQuickItem *node = nullptr;
+        QList<QQuickItem *> pending{canvas};
+        while (!pending.isEmpty()) {
+            QQuickItem *item = pending.takeLast();
+            if (item->property("nodeId").isValid() && item->property("nodeId").toInt() == 1) {
+                node = item;
+                break;
+            }
+            for (QQuickItem *child : item->childItems()) pending.append(child);
+        }
+        QVERIFY(node);
+        const qreal initialWidth = card->width();
+        const QPoint start = node->mapToScene(QPointF(31, 31)).toPoint();
+        QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, start);
+        QTest::mouseMove(window, start + QPoint(42, 12));
+        QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, start + QPoint(42, 12));
+        QTest::qWait(300);
+        QCOMPARE(window->property("selectedNodeId").toInt(), 1);
+        QVERIFY(!window->property("inspectorOpen").toBool());
+        QVERIFY(qAbs(card->width() - initialWidth) < 0.1);
+    }
+
     void inspectorAndToolbarKeepCanvasState() {
         QQuickStyle::setStyle("Basic");
         GraphBackend backend;
@@ -29,8 +66,9 @@ private slots:
         auto *editTools = window->findChild<QQuickItem *>("editViewTools");
         auto *algorithmTools = window->findChild<QQuickItem *>("algorithmTools");
         auto *layoutTools = window->findChild<QQuickItem *>("layoutTools");
+        auto *propertyTool = window->findChild<QQuickItem *>("propertyPanelTool");
         auto *headerActions = window->findChild<QQuickItem *>("headerActions");
-        QVERIFY(card && canvas && toolbar && editTools && algorithmTools && layoutTools && headerActions);
+        QVERIFY(card && canvas && toolbar && editTools && algorithmTools && layoutTools && propertyTool && headerActions);
         QCOMPARE(toolbar->height(), 96.0);
         QVERIFY(editTools->x() + editTools->width() < headerActions->x());
         QVERIFY(algorithmTools->x() + algorithmTools->width() < window->width());
@@ -54,8 +92,9 @@ private slots:
         QCOMPARE(canvas->property("zoom").toDouble(), 1.4);
 
         window->setProperty("selectedNodeId", 4);
-        QTRY_VERIFY(window->property("inspectorOpen").toBool());
-        QTRY_VERIFY(card->width() < fullWidth - 200);
+        QTest::qWait(600);
+        QVERIFY(!window->property("inspectorOpen").toBool());
+        QVERIFY(qAbs(card->width() - fullWidth) < 0.1);
         QCOMPARE(canvas->property("zoom").toDouble(), 1.4);
         QCOMPARE(canvas->property("panX").toDouble(), 23.0);
         QCOMPARE(canvas->property("layoutTick").toInt(), layoutTick);
@@ -63,16 +102,36 @@ private slots:
         window->setProperty("selectedNodeId", -1);
         window->setProperty("selectedNodeId", 5);
         QTest::qWait(600);
+        QVERIFY(!window->property("inspectorOpen").toBool());
+        auto clickPropertyTool = [&]() {
+            const QPointF scene = propertyTool->mapToScene(QPointF(propertyTool->width() / 2, propertyTool->height() / 2));
+            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, scene.toPoint());
+        };
+        clickPropertyTool();
+        QTRY_VERIFY(window->property("inspectorOpen").toBool());
+        QTRY_VERIFY(card->width() < fullWidth - 200);
+        QCOMPARE(window->property("inspectorTab").toString(), QStringLiteral("property"));
+        window->setProperty("selectedNodeId", -1);
+        QTest::qWait(600);
         QVERIFY(window->property("inspectorOpen").toBool());
+        clickPropertyTool();
+        QTRY_VERIFY(!window->property("inspectorOpen").toBool());
+        QTRY_VERIFY(qAbs(card->width() - fullWidth) < 0.1);
+        window->setProperty("selectedNodeId", 5);
+        QTest::qWait(200);
+        QVERIFY(!window->property("inspectorOpen").toBool());
 
         window->setProperty("activeAlgorithm", "prim");
-        window->setProperty("selectedNodeId", -1);
         QCOMPARE(window->property("inspectorTab").toString(), QStringLiteral("demo"));
-        QTest::qWait(600);
+        QTRY_VERIFY(window->property("inspectorOpen").toBool());
+        clickPropertyTool();
+        QCOMPARE(window->property("inspectorTab").toString(), QStringLiteral("property"));
+        clickPropertyTool();
+        QCOMPARE(window->property("inspectorTab").toString(), QStringLiteral("demo"));
         QVERIFY(window->property("inspectorOpen").toBool());
 
         window->setProperty("activeAlgorithm", "");
-        QTRY_VERIFY_WITH_TIMEOUT(!window->property("inspectorOpen").toBool(), 1500);
+        QTRY_VERIFY(!window->property("inspectorOpen").toBool());
         QTRY_VERIFY(qAbs(card->width() - fullWidth) < 0.1);
         QCOMPARE(canvas->property("layoutTick").toInt(), layoutTick);
         QCOMPARE(canvas->property("zoom").toDouble(), 1.4);
