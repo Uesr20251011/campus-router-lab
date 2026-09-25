@@ -26,11 +26,8 @@ ApplicationWindow {
     property int selectedNodeId: -1
     property int selectedLinkId: -1
     property string notice: ""
-    property bool toolbarPinned: false
-    property bool toolbarPreview: false
     property bool inspectorOpen: false
     property string inspectorTab: "demo"
-    readonly property bool toolbarExpanded: toolbarPinned || toolbarPreview
     readonly property bool hasSelection: selectedNodeId >= 0 || selectedLinkId >= 0
     readonly property bool showingProperty: inspectorTab === "property" && hasSelection
     readonly property bool showingDemo: inspectorTab === "demo" && activeAlgorithm.length > 0
@@ -226,16 +223,6 @@ ApplicationWindow {
         onTriggered: if (!window.hasSelection && window.activeAlgorithm.length === 0) window.inspectorOpen = false
     }
     Timer {
-        id: toolbarOpenTimer
-        interval: 180
-        onTriggered: window.toolbarPreview = true
-    }
-    Timer {
-        id: toolbarCloseTimer
-        interval: 350
-        onTriggered: if (!window.toolbarPinned && !toolbarHover.hovered) window.toolbarPreview = false
-    }
-    Timer {
         interval: {
             const base = speedBox.currentIndex === 0 ? 1600 : speedBox.currentIndex === 2 ? 500 : 1050
             return (window.currentStep.kind === "path" || window.currentStep.kind === "update")
@@ -254,8 +241,9 @@ ApplicationWindow {
 
     Rectangle {
         id: header
+        objectName: "mainToolbar"
         anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-        height: 84
+        height: 96
         color: "#FFFFFF"
         Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: "#E7ECF4" }
         MouseArea {
@@ -267,38 +255,41 @@ ApplicationWindow {
                 else window.showMaximized()
             }
         }
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 28; anchors.rightMargin: 28
-            spacing: 12
-            Image {
-                source: "qrc:/assets/app-icon.png"
-                sourceSize.width: 96; sourceSize.height: 96
-                Layout.preferredWidth: 48; Layout.preferredHeight: 48
-                Layout.maximumWidth: 48; Layout.maximumHeight: 48
-                fillMode: Image.PreserveAspectFit
-            }
-            Column {
-                Layout.leftMargin: 3
-                spacing: 1
-                Text { text: "校园路由实验室"; color: "#283A56"; font.pixelSize: 21; font.weight: Font.Bold }
-                Text { text: "让每一条路径都看得见"; color: "#91A0B5"; font.pixelSize: 11 }
-            }
-            Item { Layout.fillWidth: true }
+        Row {
+            id: editViewTools
+            objectName: "editViewTools"
+            anchors.left: parent.left; anchors.leftMargin: 18
+            anchors.top: parent.top; anchors.topMargin: 7
+            spacing: 4
+            Text { text: "编辑"; color: "#8292A7"; font.pixelSize: 11; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
+            ToolIconButton { symbol: "⌖"; hint: "选择与拖动 · Esc 返回此工具"; selected: window.activeTool === "select"; onClicked: window.activeTool = "select" }
+            ToolIconButton { symbol: "＋"; hint: "添加节点 · 点击画布连续添加"; selected: window.activeTool === "node"; onClicked: window.activeTool = "node" }
+            ToolIconButton { symbol: "↗"; hint: "连接节点 · 依次点击两个节点"; selected: window.activeTool === "link"; onClicked: window.activeTool = "link" }
+            ToolIconButton { symbol: "▣"; hint: "固定节点模式 · 拖动只移动当前节点"; selected: window.fixedNodes; accent: "#E9E3FB"; onClicked: window.fixedNodes = !window.fixedNodes }
+            ToolIconButton { symbol: "◎"; hint: "自动整理节点"; enabled: !window.fixedNodes; onClicked: { canvas.commitNow(); graphBackend.autoLayout(); canvas.fitView() } }
+            Rectangle { width: 1; height: 25; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "视图"; color: "#8292A7"; font.pixelSize: 11; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
+            ToolIconButton { symbol: "¥"; hint: "显示建设造价"; selected: window.metric === "cost"; onClicked: window.metric = "cost" }
+            ToolIconButton { symbol: "◫"; hint: "显示传输容量"; selected: window.metric === "capacity"; accent: "#E9E3FB"; onClicked: window.metric = "capacity" }
+            ToolIconButton { symbol: "⊞"; hint: "显示或隐藏全部边权"; selected: canvas.showAllWeights; onClicked: canvas.showAllWeights = !canvas.showAllWeights }
+            ToolIconButton { symbol: "⛶"; hint: "适应视图"; onClicked: canvas.fitView() }
+        }
+        Row {
+            id: headerActions
+            objectName: "headerActions"
+            anchors.right: parent.right; anchors.rightMargin: 13
+            anchors.top: parent.top; anchors.topMargin: 8
+            spacing: 8
             SoftButton {
                 id: networkButton
+                objectName: "networkButton"
                 text: "网络管理"; symbol: "◌"
+                compact: true
                 selected: networkPopup.visible
                 onClicked: networkPopup.visible ? networkPopup.close() : networkPopup.open()
             }
-            Rectangle { width: 1; height: 32; color: "#E8EDF4"; Layout.leftMargin: 7; Layout.rightMargin: 7 }
-            Text {
-                visible: window.width >= 1190
-                text: graphBackend.nodes.length + " 个节点  ·  " + graphBackend.links.length + " 条链路"
-                color: "#7F90A6"; font.pixelSize: 12
-            }
+            Rectangle { width: 1; height: 27; color: "#E8EDF4"; anchors.verticalCenter: parent.verticalCenter }
             Row {
-                Layout.leftMargin: 4
                 spacing: 2
                 WindowControl { symbol: "−"; accessibleName: "最小化"; onClicked: window.showMinimized() }
                 WindowControl {
@@ -312,14 +303,37 @@ ApplicationWindow {
                 WindowControl { symbol: "×"; accessibleName: "关闭"; destructive: true; onClicked: window.close() }
             }
         }
+        Rectangle { x: 18; y: 47; width: parent.width - 36; height: 1; color: "#F0F3F8" }
+        Row {
+            id: algorithmTools
+            objectName: "algorithmTools"
+            anchors.left: parent.left; anchors.leftMargin: 18
+            anchors.top: parent.top; anchors.topMargin: 53
+            spacing: 5
+            Text { text: "算法"; color: "#8292A7"; font.pixelSize: 11; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
+            ToolIconButton { objectName: "primTool"; symbol: "✳"; hint: "Prim 最小生成树 · 再次点击退出演示"; selected: window.activeAlgorithm === "prim"; onClicked: window.runAlgorithm("prim") }
+            ToolIconButton { symbol: "◇"; hint: "Kruskal 最小生成树 · 再次点击退出演示"; selected: window.activeAlgorithm === "kruskal"; onClicked: window.runAlgorithm("kruskal") }
+            ToolIconButton { symbol: "⇢"; hint: "最大流 · 再次点击退出演示"; selected: window.activeAlgorithm === "flow"; accent: "#E9E3FB"; onClicked: window.runAlgorithm("flow") }
+            Rectangle { width: 1; height: 27; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "起点"; color: "#8292A7"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+            SoftSpinBox { id: sourceBox; width: 88; height: 36; from: 1; to: 200; value: 1; ToolTip.visible: hovered; ToolTip.text: "算法起点 · 可直接输入" }
+            Text { text: "终点"; color: "#8292A7"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+            SoftSpinBox { id: sinkBox; width: 88; height: 36; from: 1; to: 200; value: 20; ToolTip.visible: hovered; ToolTip.text: "最大流终点 · 可直接输入" }
+        }
+        Text {
+            anchors.right: parent.right; anchors.rightMargin: 24
+            anchors.verticalCenter: algorithmTools.verticalCenter
+            text: graphBackend.nodes.length + " 个节点  ·  " + graphBackend.links.length + " 条链路"
+            color: "#8A99AD"; font.pixelSize: 11
+        }
     }
 
     Popup {
         id: networkPopup
         objectName: "networkPopup"
         parent: networkButton
-        x: 0
-        y: networkButton.height + 10
+        x: networkButton.width - width
+        y: networkButton.mapFromItem(header, 0, header.height + 8).y
         width: 270; height: 276
         padding: 14
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
@@ -657,103 +671,6 @@ ApplicationWindow {
                 Item { height: 6 }
             }
             }
-        }
-    }
-
-    Item {
-        id: toolbarShell
-        objectName: "toolbarShell"
-        x: canvasCard.x + (canvasCard.width - width) / 2
-        y: header.height + 4
-        width: window.toolbarExpanded ? 480 : 78
-        height: window.toolbarExpanded ? 119 : 24
-        clip: true
-        z: 80
-        Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-        Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-        Behavior on height { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-        HoverHandler {
-            id: toolbarHover
-            onHoveredChanged: {
-                if (hovered) {
-                    toolbarCloseTimer.stop()
-                    if (!window.toolbarPinned) toolbarOpenTimer.restart()
-                } else {
-                    toolbarOpenTimer.stop()
-                    toolbarCloseTimer.restart()
-                }
-            }
-        }
-        Rectangle {
-            anchors.fill: parent
-            radius: 17; color: "#FFFFFF"; border.color: "#DFE8F2"
-        }
-        Rectangle {
-            id: toolbarHandle
-            width: 78; height: 24
-            anchors.top: parent.top; anchors.horizontalCenter: parent.horizontalCenter
-            radius: 11; color: window.toolbarExpanded ? "#EAF6F2" : "#F2F7FA"
-            Text {
-                anchors.centerIn: parent
-                text: (window.activeTool === "node" ? "＋" : window.activeTool === "link" ? "↗" : "⌖") + "  ▾"
-                color: "#4C9C8C"; font.family: "Segoe UI Symbol"; font.pixelSize: 14
-            }
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    if (window.toolbarExpanded) {
-                        window.toolbarPinned = false
-                        window.toolbarPreview = false
-                        toolbarOpenTimer.stop()
-                    } else {
-                        window.toolbarPinned = true
-                        toolbarCloseTimer.stop()
-                    }
-                }
-            }
-        }
-        Row {
-            id: editViewRow
-            anchors.top: toolbarHandle.bottom
-            anchors.topMargin: 6
-            anchors.horizontalCenter: parent.horizontalCenter
-            spacing: 4
-            ToolIconButton { symbol: "⌖"; hint: "选择与拖动 · Esc 返回此工具"; selected: window.activeTool === "select"; onClicked: { window.activeTool = "select"; window.toolbarPinned = true } }
-            ToolIconButton { symbol: "＋"; hint: "添加节点 · 点击画布连续添加"; selected: window.activeTool === "node"; onClicked: { window.activeTool = "node"; window.toolbarPinned = true } }
-            ToolIconButton { symbol: "↗"; hint: "连接节点 · 依次点击两个节点"; selected: window.activeTool === "link"; onClicked: { window.activeTool = "link"; window.toolbarPinned = true } }
-            Rectangle { width: 1; height: 25; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
-            ToolIconButton { symbol: "▣"; hint: "固定节点模式 · 拖动只移动当前节点"; selected: window.fixedNodes; accent: "#E9E3FB"; onClicked: { window.fixedNodes = !window.fixedNodes; window.toolbarPinned = true } }
-            ToolIconButton { symbol: "◎"; hint: "自动整理节点"; enabled: !window.fixedNodes; onClicked: { canvas.commitNow(); graphBackend.autoLayout(); canvas.fitView(); window.toolbarPinned = true } }
-            Rectangle { width: 1; height: 25; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
-            ToolIconButton { symbol: "¥"; hint: "显示建设造价"; selected: window.metric === "cost"; onClicked: { window.metric = "cost"; window.toolbarPinned = true } }
-            ToolIconButton { symbol: "◫"; hint: "显示传输容量"; selected: window.metric === "capacity"; accent: "#E9E3FB"; onClicked: { window.metric = "capacity"; window.toolbarPinned = true } }
-            ToolIconButton { symbol: "⊞"; hint: "显示或隐藏全部边权"; selected: canvas.showAllWeights; onClicked: { canvas.showAllWeights = !canvas.showAllWeights; window.toolbarPinned = true } }
-            ToolIconButton { symbol: "⛶"; hint: "适应视图"; onClicked: { canvas.fitView(); window.toolbarPinned = true } }
-        }
-        Rectangle {
-            anchors.top: editViewRow.bottom
-            anchors.topMargin: 5
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: 442; height: 1; color: "#EDF1F7"
-        }
-        Row {
-            anchors.top: editViewRow.bottom
-            anchors.topMargin: 9
-            anchors.horizontalCenter: parent.horizontalCenter
-            spacing: 5
-            Text {
-                text: "算法"; color: "#8A96AA"; font.pixelSize: 11; font.weight: Font.DemiBold
-                anchors.verticalCenter: parent.verticalCenter
-            }
-            ToolIconButton { objectName: "primTool"; symbol: "✳"; hint: "Prim 最小生成树 · 再次点击退出演示"; selected: window.activeAlgorithm === "prim"; onClicked: { window.runAlgorithm("prim"); window.toolbarPinned = true } }
-            ToolIconButton { symbol: "◇"; hint: "Kruskal 最小生成树 · 再次点击退出演示"; selected: window.activeAlgorithm === "kruskal"; onClicked: { window.runAlgorithm("kruskal"); window.toolbarPinned = true } }
-            ToolIconButton { symbol: "⇢"; hint: "最大流 · 再次点击退出演示"; selected: window.activeAlgorithm === "flow"; accent: "#E9E3FB"; onClicked: { window.runAlgorithm("flow"); window.toolbarPinned = true } }
-            Rectangle { width: 1; height: 27; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: "起点"; color: "#8A96AA"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
-            SoftSpinBox { id: sourceBox; width: 88; height: 36; from: 1; to: 200; value: 1; onActiveFocusChanged: if (activeFocus) window.toolbarPinned = true; ToolTip.visible: hovered; ToolTip.text: "算法起点 · 可直接输入" }
-            Text { text: "终点"; color: "#8A96AA"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
-            SoftSpinBox { id: sinkBox; width: 88; height: 36; from: 1; to: 200; value: 20; onActiveFocusChanged: if (activeFocus) window.toolbarPinned = true; ToolTip.visible: hovered; ToolTip.text: "最大流终点 · 可直接输入" }
         }
     }
 

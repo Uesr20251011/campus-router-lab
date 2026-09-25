@@ -25,20 +25,33 @@ private slots:
 
         auto *card = window->findChild<QQuickItem *>("canvasCard");
         auto *canvas = window->findChild<QQuickItem *>("graphCanvas");
-        auto *toolbar = window->findChild<QQuickItem *>("toolbarShell");
-        QVERIFY(card && canvas && toolbar);
+        auto *toolbar = window->findChild<QQuickItem *>("mainToolbar");
+        auto *editTools = window->findChild<QQuickItem *>("editViewTools");
+        auto *algorithmTools = window->findChild<QQuickItem *>("algorithmTools");
+        auto *headerActions = window->findChild<QQuickItem *>("headerActions");
+        QVERIFY(card && canvas && toolbar && editTools && algorithmTools && headerActions);
+        QCOMPARE(toolbar->height(), 96.0);
+        QVERIFY(editTools->x() + editTools->width() < headerActions->x());
+        QVERIFY(algorithmTools->x() + algorithmTools->width() < window->width());
+        QVERIFY(!window->findChild<QObject *>("toolbarShell"));
+        auto *networkButton = window->findChild<QQuickItem *>("networkButton");
+        auto *networkPopup = window->findChild<QObject *>("networkPopup");
+        QVERIFY(networkButton && networkPopup);
+        QVERIFY(QMetaObject::invokeMethod(networkPopup, "open"));
+        QTRY_VERIFY(networkPopup->property("visible").toBool());
+        const qreal popupRight = networkButton->mapToScene(QPointF(networkPopup->property("x").toDouble(), 0)).x()
+                                 + networkPopup->property("width").toDouble();
+        QVERIFY(popupRight <= window->width());
+        QVERIFY(QMetaObject::invokeMethod(networkPopup, "close"));
         QTRY_VERIFY(qAbs(card->width() - 848.0) < 0.1);
         const qreal fullWidth = card->width();
         const int layoutTick = canvas->property("layoutTick").toInt();
         canvas->setProperty("zoom", 1.4);
         canvas->setProperty("panX", 23);
 
-        window->setProperty("toolbarPinned", true);
-        QTRY_VERIFY(toolbar->width() > 470);
         QVERIFY(qAbs(card->width() - fullWidth) < 0.1);
         QCOMPARE(canvas->property("zoom").toDouble(), 1.4);
 
-        window->setProperty("toolbarPinned", false);
         window->setProperty("selectedNodeId", 4);
         QTRY_VERIFY(window->property("inspectorOpen").toBool());
         QTRY_VERIFY(card->width() < fullWidth - 200);
@@ -63,22 +76,17 @@ private slots:
         QCOMPARE(canvas->property("layoutTick").toInt(), layoutTick);
         QCOMPARE(canvas->property("zoom").toDouble(), 1.4);
 
-        window->setProperty("toolbarPinned", true);
-        QTRY_VERIFY(toolbar->width() > 470);
         auto *prim = window->findChild<QQuickItem *>("primTool");
-        auto *rightPane = window->findChild<QQuickItem *>("rightPane");
-        QVERIFY(prim && rightPane);
+        QVERIFY(prim);
         auto clickPrim = [&]() {
             const QPointF scene = prim->mapToScene(QPointF(prim->width() / 2, prim->height() / 2));
             QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, scene.toPoint());
         };
         clickPrim();
         QTRY_COMPARE(window->property("activeAlgorithm").toString(), QStringLiteral("prim"));
-        QTRY_VERIFY(toolbar->x() + toolbar->width() < rightPane->x());
+        QCOMPARE(toolbar->height(), 96.0);
         clickPrim();
         QTRY_COMPARE(window->property("activeAlgorithm").toString(), QString());
-        window->setProperty("toolbarPinned", false);
-        QTRY_VERIFY(toolbar->width() < 80);
     }
 };
 
