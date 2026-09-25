@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(CampusRouterLab VERSION 1.1.1 LANGUAGES CXX)
+project(CampusRouterLab VERSION 1.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -33,6 +33,8 @@ qt_add_qml_module(campus_router
         qml/SoftButton.qml
         qml/SoftSpinBox.qml
         qml/SoftComboBox.qml
+        qml/SoftTextField.qml
+        qml/ToolIconButton.qml
         qml/WindowControl.qml
 )
 target_link_libraries(campus_router PRIVATE router_core Qt6::Quick Qt6::QuickControls2)
@@ -48,3 +50,9 @@ target_compile_definitions(canvas_tests PRIVATE QML_CANVAS_PATH="${CMAKE_CURRENT
 target_compile_definitions(canvas_tests PRIVATE QML_SPINBOX_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qml/SoftSpinBox.qml")
 add_test(NAME canvas_tests COMMAND canvas_tests)
 set_tests_properties(canvas_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
+
+qt_add_executable(layout_tests tests/tst_layout.cpp)
+target_link_libraries(layout_tests PRIVATE router_core Qt6::Quick Qt6::QuickControls2 Qt6::Test)
+target_compile_definitions(layout_tests PRIVATE QML_MAIN_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qml/Main.qml")
+add_test(NAME layout_tests COMMAND layout_tests)
+set_tests_properties(layout_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")

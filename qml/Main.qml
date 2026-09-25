@@ -26,13 +26,24 @@ ApplicationWindow {
     property int selectedNodeId: -1
     property int selectedLinkId: -1
     property string notice: ""
+    property bool toolbarPinned: false
+    property bool toolbarPreview: false
+    property bool inspectorOpen: false
+    property string inspectorTab: "demo"
+    readonly property bool toolbarExpanded: toolbarPinned || toolbarPreview
+    readonly property bool hasSelection: selectedNodeId >= 0 || selectedLinkId >= 0
+    readonly property bool showingProperty: inspectorTab === "property" && hasSelection
+    readonly property bool showingDemo: inspectorTab === "demo" && activeAlgorithm.length > 0
     readonly property var currentStep: stepIndex >= 0 && stepIndex < traceSteps.length ? traceSteps[stepIndex] : ({})
     readonly property bool treeReady: (activeAlgorithm === "prim" || activeAlgorithm === "kruskal")
                                       && currentStep.kind === "finish"
                                       && currentStep.selectedEdges
                                       && currentStep.selectedEdges.length === graphBackend.nodes.length - 1
-    readonly property bool showFlowResult: activeAlgorithm === "flow" && currentStep.kind === "finish"
-                                           && selectedNodeId < 0 && selectedLinkId < 0
+    readonly property bool flowFinished: activeAlgorithm === "flow" && currentStep.kind === "finish"
+    readonly property bool showFlowResult: flowFinished && showingDemo
+    onHasSelectionChanged: updateInspector()
+    onActiveAlgorithmChanged: updateInspector()
+    onNoticeChanged: if (notice.length > 0) noticeTimer.restart()
     onStepIndexChanged: {
         if (treeOnly && stepIndex !== traceSteps.length - 1) treeOnly = false
         if (currentStep.kind !== "finish") highlightedFlowPath = -1
@@ -46,6 +57,19 @@ ApplicationWindow {
         activeAlgorithm = ""
         highlightedFlowPath = -1
     }
+    function updateInspector() {
+        if (hasSelection) {
+            inspectorCloseTimer.stop()
+            inspectorOpen = true
+            inspectorTab = "property"
+        } else if (activeAlgorithm.length > 0) {
+            inspectorCloseTimer.stop()
+            inspectorOpen = true
+            inspectorTab = "demo"
+        } else {
+            inspectorCloseTimer.restart()
+        }
+    }
     function exitDemo() {
         canvas.commitNow()
         resetTrace()
@@ -56,11 +80,16 @@ ApplicationWindow {
     function chooseNode(id) {
         selectedNodeId = id
         selectedLinkId = -1
-        if (id >= 0) nodeNameField.text = graphBackend.nodeName(id)
+        if (id >= 0) {
+            nodeNameField.text = graphBackend.nodeName(id)
+            inspectorTab = "property"
+        } else if (activeAlgorithm.length > 0) inspectorTab = "demo"
     }
     function chooseLink(id) {
         selectedLinkId = id
         selectedNodeId = -1
+        if (id >= 0) inspectorTab = "property"
+        else if (activeAlgorithm.length > 0) inspectorTab = "demo"
         const link = selectedLinkData()
         if (link) {
             costField.text = link.hasCost ? String(link.cost) : "0"
@@ -82,6 +111,7 @@ ApplicationWindow {
         sinkBox.commitInput()
         const result = graphBackend.run(which, sourceBox.value, sinkBox.value)
         activeAlgorithm = which
+        inspectorTab = "demo"
         metric = which === "flow" ? "capacity" : "cost"
         traceSteps = result.steps
         stepIndex = traceSteps.length ? 0 : -1
@@ -184,6 +214,26 @@ ApplicationWindow {
     Connections {
         target: graphBackend
         function onTopologyChanged() { window.resetTrace() }
+    }
+    Timer {
+        id: noticeTimer
+        interval: 4500
+        onTriggered: window.notice = ""
+    }
+    Timer {
+        id: inspectorCloseTimer
+        interval: 500
+        onTriggered: if (!window.hasSelection && window.activeAlgorithm.length === 0) window.inspectorOpen = false
+    }
+    Timer {
+        id: toolbarOpenTimer
+        interval: 180
+        onTriggered: window.toolbarPreview = true
+    }
+    Timer {
+        id: toolbarCloseTimer
+        interval: 350
+        onTriggered: if (!window.toolbarPinned && !toolbarHover.hovered) window.toolbarPreview = false
     }
     Timer {
         interval: {
@@ -363,57 +413,16 @@ ApplicationWindow {
         anchors.left: parent.left; anchors.right: parent.right
 
         Rectangle {
-            id: leftPane
-            x: 16; y: 16; width: window.width < 1200 ? 190 : 216; height: parent.height - 32
-            color: "#FFFFFF"; radius: 22
-            border.color: "#E7ECF4"
-            Flickable {
-                anchors.fill: parent; anchors.margins: 18
-                clip: true
-                contentWidth: width
-                contentHeight: leftColumn.implicitHeight
-                boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-                ColumnLayout {
-                id: leftColumn
-                width: parent.width
-                spacing: 8
-                Text { text: "编辑画布"; color: "#344862"; font.pixelSize: 15; font.weight: Font.DemiBold }
-                Text { text: "移动、连接，自由搭建网络"; color: "#94A2B5"; font.pixelSize: 11 }
-                Item { height: 6 }
-                SoftButton { Layout.fillWidth: true; text: "选择与拖动"; symbol: "⌖"; selected: window.activeTool === "select"; onClicked: window.activeTool = "select" }
-                SoftButton { Layout.fillWidth: true; text: "添加节点"; symbol: "＋"; selected: window.activeTool === "node"; onClicked: window.activeTool = "node" }
-                SoftButton { Layout.fillWidth: true; text: "连接节点"; symbol: "↗"; selected: window.activeTool === "link"; onClicked: window.activeTool = "link" }
-                SoftButton { Layout.fillWidth: true; text: "固定节点模式"; symbol: "▣"; selected: window.fixedNodes; accent: "#DCD4F9"; onClicked: window.fixedNodes = !window.fixedNodes }
-                SoftButton { Layout.fillWidth: true; text: "自动整理"; symbol: "◎"; enabled: !window.fixedNodes; opacity: enabled ? 1 : 0.48; onClicked: { canvas.commitNow(); graphBackend.autoLayout(); canvas.fitView() } }
-                Rectangle { Layout.fillWidth: true; height: 1; color: "#EBEFF6"; Layout.topMargin: 11; Layout.bottomMargin: 8 }
-                Text { text: "算法演示"; color: "#344862"; font.pixelSize: 15; font.weight: Font.DemiBold }
-                Text { text: "再次点击当前算法可退出演示"; color: "#94A2B5"; font.pixelSize: 11 }
-                SoftButton { Layout.fillWidth: true; text: "Prim 最小生成树"; symbol: "✳"; selected: window.activeAlgorithm === "prim"; accent: "#BDEAD9"; onClicked: window.runAlgorithm("prim") }
-                SoftButton { Layout.fillWidth: true; text: "Kruskal 最小生成树"; symbol: "✳"; selected: window.activeAlgorithm === "kruskal"; accent: "#BDEAD9"; onClicked: window.runAlgorithm("kruskal") }
-                SoftButton { Layout.fillWidth: true; text: "最大流"; symbol: "⇢"; selected: window.activeAlgorithm === "flow"; accent: "#DCD4F9"; onClicked: window.runAlgorithm("flow") }
-                Item { height: 6 }
-                Rectangle {
-                    Layout.fillWidth: true; height: 88; radius: 16; color: "#F4F8FF"
-                    Column {
-                        anchors.fill: parent; anchors.margins: 12; spacing: 5
-                        Text { text: "小提示"; color: "#6685AE"; font.pixelSize: 12; font.weight: Font.DemiBold }
-                        Text { width: parent.width; wrapMode: Text.Wrap; text: window.fixedNodes ? "固定模式下自由排布，拖动只移动当前节点。" : "拖动节点会带动邻居；悬停节点可看清相连的边。"; color: "#7C8DA5"; font.pixelSize: 11 }
-                    }
-                }
-            }
-            }
-        }
-
-        Rectangle {
             id: canvasCard
-            anchors.left: leftPane.right; anchors.leftMargin: 12
-            anchors.right: rightPane.left; anchors.rightMargin: 12
-            anchors.top: parent.top; anchors.topMargin: 16
-            anchors.bottom: parent.bottom; anchors.bottomMargin: 16
+            objectName: "canvasCard"
+            x: 16; y: 16
+            width: parent.width - 32 - (window.inspectorOpen ? rightPane.width + 12 : 0)
+            height: parent.height - 32
             color: "#FFFFFF"; radius: 22; border.color: "#E7ECF4"
+            Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
             GraphCanvas {
                 id: canvas
+                objectName: "graphCanvas"
                 anchors.fill: parent; anchors.margins: 8
                 nodes: graphBackend.nodes
                 links: graphBackend.links
@@ -446,15 +455,6 @@ ApplicationWindow {
                     else window.notice = graphBackend.error
                 }
             }
-            Row {
-                anchors.right: parent.right; anchors.top: parent.top
-                anchors.rightMargin: 20; anchors.topMargin: 20
-                spacing: 8
-                SoftButton { text: "造价"; compact: true; selected: window.metric === "cost"; onClicked: window.metric = "cost" }
-                SoftButton { text: "容量"; compact: true; selected: window.metric === "capacity"; accent: "#DAD1F4"; onClicked: window.metric = "capacity" }
-                SoftButton { text: "全部边权"; compact: true; selected: canvas.showAllWeights; onClicked: canvas.showAllWeights = !canvas.showAllWeights }
-                SoftButton { text: "适应"; compact: true; onClicked: canvas.fitView() }
-            }
             Rectangle {
                 anchors.left: parent.left; anchors.bottom: parent.bottom
                 anchors.leftMargin: 20; anchors.bottomMargin: 20
@@ -463,7 +463,7 @@ ApplicationWindow {
                 Row {
                     id: legendRow; anchors.centerIn: parent; spacing: 13
                     Repeater {
-                        model: window.showFlowResult
+                        model: window.flowFinished
                             ? [{name:"彩色路径",tone:"#36AA99"}, {name:"未载流",tone:"#AEB8C8"}]
                             : window.activeAlgorithm === "flow"
                             ? [{name:"探索",tone:"#EAA668"}, {name:"通路",tone:"#50BDA7"},
@@ -477,13 +477,33 @@ ApplicationWindow {
                     }
                 }
             }
+            Rectangle {
+                visible: window.notice.length > 0
+                anchors.right: parent.right; anchors.bottom: parent.bottom
+                anchors.rightMargin: 20; anchors.bottomMargin: 20
+                width: Math.min(parent.width - 48, Math.max(170, noticeText.implicitWidth + 28))
+                height: Math.max(38, noticeText.implicitHeight + 18)
+                radius: 12; color: "#F4F8FF"; border.color: "#DCE7F2"
+                Text {
+                    id: noticeText
+                    anchors.centerIn: parent
+                    width: parent.width - 24
+                    text: window.notice
+                    color: "#54708C"; font.pixelSize: 11
+                    wrapMode: Text.Wrap
+                    horizontalAlignment: Text.AlignHCenter
+                }
+            }
         }
 
         Rectangle {
             id: rightPane
-            width: window.width < 1200 ? 248 : 290; height: parent.height - 32; y: 16
-            anchors.right: parent.right; anchors.rightMargin: 16
+            objectName: "rightPane"
+            width: window.width < 1200 ? 248 : 290
+            height: parent.height - 32; y: 16
+            x: window.inspectorOpen ? parent.width - width - 16 : parent.width + 8
             color: "#FFFFFF"; radius: 22; border.color: "#E7ECF4"
+            Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
             Flickable {
                 anchors.fill: parent; anchors.margins: 18
                 clip: true
@@ -495,18 +515,30 @@ ApplicationWindow {
                 id: rightColumn
                 width: parent.width
                 spacing: 11
-                Text { text: window.showFlowResult ? "最大流结果" : "属性与结果"; color: "#344862"; font.pixelSize: 16; font.weight: Font.DemiBold }
-                Text { text: window.showFlowResult ? "总流量 " + window.currentStep.value + " 包/秒" : "点击节点或连线，即可在这里修改"; color: window.showFlowResult ? "#45A996" : "#94A2B5"; font.pixelSize: window.showFlowResult ? 13 : 11 }
+                Text {
+                    text: window.showingProperty ? "属性编辑" : window.showFlowResult ? "最大流结果" : "算法演示"
+                    color: "#344862"; font.pixelSize: 16; font.weight: Font.DemiBold
+                }
+                Text {
+                    text: window.showingProperty ? "修改选中节点或链路" : window.showFlowResult
+                          ? "总流量 " + window.currentStep.value + " 包/秒" : "跟随步骤查看算法过程"
+                    color: window.showFlowResult ? "#45A996" : "#94A2B5"; font.pixelSize: 12
+                }
+                RowLayout {
+                    visible: window.hasSelection && window.activeAlgorithm.length > 0
+                    Layout.fillWidth: true; spacing: 7
+                    SoftButton { text: "属性"; compact: true; Layout.fillWidth: true; selected: window.inspectorTab === "property"; onClicked: window.inspectorTab = "property" }
+                    SoftButton { text: "演示"; compact: true; Layout.fillWidth: true; selected: window.inspectorTab === "demo"; onClicked: window.inspectorTab = "demo" }
+                }
                 Rectangle { Layout.fillWidth: true; height: 1; color: "#EBEFF6"; Layout.topMargin: 5 }
                 ColumnLayout {
-                    visible: window.selectedNodeId >= 0
+                    visible: window.showingProperty && window.selectedNodeId >= 0
                     Layout.fillWidth: true; spacing: 8
                     Text { text: "节点  R" + window.selectedNodeId; color: "#7285A0"; font.pixelSize: 12 }
-                    TextField {
+                    SoftTextField {
                         id: nodeNameField
                         Layout.fillWidth: true
                         placeholderText: "节点名称"
-                        selectByMouse: true
                         onAccepted: { canvas.commitNow(); graphBackend.renameNode(window.selectedNodeId, text) }
                     }
                     RowLayout {
@@ -516,7 +548,7 @@ ApplicationWindow {
                     }
                 }
                 ColumnLayout {
-                    visible: window.selectedLinkId >= 0
+                    visible: window.showingProperty && window.selectedLinkId >= 0
                     Layout.fillWidth: true; spacing: 8
                     Text {
                         text: {
@@ -526,9 +558,9 @@ ApplicationWindow {
                         color: "#7285A0"; font.pixelSize: 12
                     }
                     Text { text: "建设造价"; color: "#8191A8"; font.pixelSize: 11 }
-                    TextField { id: costField; Layout.fillWidth: true; placeholderText: "例如 10"; validator: IntValidator { bottom: 0 } selectByMouse: true }
+                    SoftTextField { id: costField; Layout.fillWidth: true; placeholderText: "例如 10"; validator: IntValidator { bottom: 0 } }
                     Text { text: "最大传输容量（包/秒）"; color: "#8191A8"; font.pixelSize: 11 }
-                    TextField { id: capacityField; Layout.fillWidth: true; placeholderText: "例如 15"; validator: IntValidator { bottom: 0 } selectByMouse: true }
+                    SoftTextField { id: capacityField; Layout.fillWidth: true; placeholderText: "例如 15"; validator: IntValidator { bottom: 0 } }
                     RowLayout {
                         Layout.fillWidth: true
                         Text {
@@ -547,7 +579,7 @@ ApplicationWindow {
                     }
                 }
                 Rectangle {
-                    visible: window.selectedNodeId < 0 && window.selectedLinkId < 0 && !window.showFlowResult
+                    visible: !window.hasSelection && !window.showingDemo
                     Layout.fillWidth: true; height: 105; radius: 16; color: "#F6F8FD"
                     Column {
                         anchors.centerIn: parent; spacing: 7
@@ -555,27 +587,10 @@ ApplicationWindow {
                         Text { text: "选择一个节点或链路"; color: "#93A1B5"; font.pixelSize: 12; anchors.horizontalCenter: parent.horizontalCenter }
                     }
                 }
-                Rectangle { visible: !window.showFlowResult; Layout.fillWidth: true; height: 1; color: "#EBEFF6"; Layout.topMargin: 4 }
-                Text { visible: !window.showFlowResult; text: "计算范围"; color: "#344862"; font.pixelSize: 14; font.weight: Font.DemiBold }
-                ColumnLayout {
-                    visible: !window.showFlowResult
-                    Layout.fillWidth: true
-                    spacing: 7
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Text { text: "起点"; color: "#8292A7"; font.pixelSize: 12 }
-                        SoftSpinBox { id: sourceBox; from: 1; to: 200; value: 1; Layout.fillWidth: true }
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Text { text: "终点"; color: "#8292A7"; font.pixelSize: 12 }
-                        SoftSpinBox { id: sinkBox; from: 1; to: 200; value: 20; Layout.fillWidth: true }
-                    }
-                }
-                Rectangle { visible: !window.showFlowResult; Layout.fillWidth: true; height: 1; color: "#EBEFF6"; Layout.topMargin: 4 }
-                Text { visible: !window.showFlowResult; text: "当前步骤"; color: "#344862"; font.pixelSize: 14; font.weight: Font.DemiBold }
+                Rectangle { visible: window.showingDemo; Layout.fillWidth: true; height: 1; color: "#EBEFF6"; Layout.topMargin: 4 }
+                Text { visible: window.showingDemo && !window.showFlowResult; text: "当前步骤"; color: "#344862"; font.pixelSize: 14; font.weight: Font.DemiBold }
                 Rectangle {
-                    visible: !window.showFlowResult
+                    visible: window.showingDemo && !window.showFlowResult
                     Layout.fillWidth: true; Layout.preferredHeight: window.activeAlgorithm === "flow" ? 166 : 146
                     radius: 17; color: "#F4F7FE"; border.color: "#E8ECF7"
                     Column {
@@ -585,15 +600,15 @@ ApplicationWindow {
                         Text { width: parent.width; text: window.currentStep.detail || "算法经过的节点和链路会在画布上依次亮起。"; color: "#7D90A9"; font.pixelSize: 12; wrapMode: Text.Wrap }
                     }
                 }
-                Text { visible: !window.showFlowResult && window.stepIndex >= 0; text: (window.activeAlgorithm === "flow" ? "当前流量  " : "累计造价  ") + (window.currentStep.value || 0); color: "#57AF9C"; font.pixelSize: 17; font.weight: Font.Bold }
+                Text { visible: window.showingDemo && !window.showFlowResult && window.stepIndex >= 0; text: (window.activeAlgorithm === "flow" ? "当前流量  " : "累计造价  ") + (window.currentStep.value || 0); color: "#57AF9C"; font.pixelSize: 17; font.weight: Font.Bold }
                 Text {
-                    visible: !window.showFlowResult && window.activeAlgorithm === "flow" && window.stepIndex >= 0
+                    visible: window.showingDemo && !window.showFlowResult && window.activeAlgorithm === "flow" && window.stepIndex >= 0
                     Layout.fillWidth: true; wrapMode: Text.Wrap
                     text: "边权 0/7 = 已用/总容量；灰边已耗尽，紫色箭头可反向回退。"
                     color: "#8494AA"; font.pixelSize: 11
                 }
                 ColumnLayout {
-                    visible: window.showFlowResult
+                    visible: window.showingDemo && window.showFlowResult
                     Layout.fillWidth: true; spacing: 7
                     Text {
                         text: "最终路径 · " + (window.currentStep.flowPaths ? window.currentStep.flowPaths.length : 0) + " 条"
@@ -638,18 +653,117 @@ ApplicationWindow {
                         }
                     }
                 }
-                Text { visible: !window.showFlowResult && window.notice.length > 0; text: window.notice; color: "#C37D7F"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                Item { visible: !window.showFlowResult; height: 6 }
-                Text { visible: !window.showFlowResult; text: "提示：双击不是必需操作，单击即可编辑。"; color: "#A3AEC0"; font.pixelSize: 10; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                Text { visible: window.notice.length > 0; text: window.notice; color: "#C37D7F"; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                Item { height: 6 }
             }
             }
+        }
+    }
+
+    Item {
+        id: toolbarShell
+        objectName: "toolbarShell"
+        x: canvasCard.x + (canvasCard.width - width) / 2
+        y: header.height + 4
+        width: window.toolbarExpanded ? 480 : 78
+        height: window.toolbarExpanded ? 119 : 24
+        clip: true
+        z: 80
+        Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        Behavior on height { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+        HoverHandler {
+            id: toolbarHover
+            onHoveredChanged: {
+                if (hovered) {
+                    toolbarCloseTimer.stop()
+                    if (!window.toolbarPinned) toolbarOpenTimer.restart()
+                } else {
+                    toolbarOpenTimer.stop()
+                    toolbarCloseTimer.restart()
+                }
+            }
+        }
+        Rectangle {
+            anchors.fill: parent
+            radius: 17; color: "#FFFFFF"; border.color: "#DFE8F2"
+        }
+        Rectangle {
+            id: toolbarHandle
+            width: 78; height: 24
+            anchors.top: parent.top; anchors.horizontalCenter: parent.horizontalCenter
+            radius: 11; color: window.toolbarExpanded ? "#EAF6F2" : "#F2F7FA"
+            Text {
+                anchors.centerIn: parent
+                text: (window.activeTool === "node" ? "＋" : window.activeTool === "link" ? "↗" : "⌖") + "  ▾"
+                color: "#4C9C8C"; font.family: "Segoe UI Symbol"; font.pixelSize: 14
+            }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    if (window.toolbarExpanded) {
+                        window.toolbarPinned = false
+                        window.toolbarPreview = false
+                        toolbarOpenTimer.stop()
+                    } else {
+                        window.toolbarPinned = true
+                        toolbarCloseTimer.stop()
+                    }
+                }
+            }
+        }
+        Row {
+            id: editViewRow
+            anchors.top: toolbarHandle.bottom
+            anchors.topMargin: 6
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: 4
+            ToolIconButton { symbol: "⌖"; hint: "选择与拖动 · Esc 返回此工具"; selected: window.activeTool === "select"; onClicked: { window.activeTool = "select"; window.toolbarPinned = true } }
+            ToolIconButton { symbol: "＋"; hint: "添加节点 · 点击画布连续添加"; selected: window.activeTool === "node"; onClicked: { window.activeTool = "node"; window.toolbarPinned = true } }
+            ToolIconButton { symbol: "↗"; hint: "连接节点 · 依次点击两个节点"; selected: window.activeTool === "link"; onClicked: { window.activeTool = "link"; window.toolbarPinned = true } }
+            Rectangle { width: 1; height: 25; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
+            ToolIconButton { symbol: "▣"; hint: "固定节点模式 · 拖动只移动当前节点"; selected: window.fixedNodes; accent: "#E9E3FB"; onClicked: { window.fixedNodes = !window.fixedNodes; window.toolbarPinned = true } }
+            ToolIconButton { symbol: "◎"; hint: "自动整理节点"; enabled: !window.fixedNodes; onClicked: { canvas.commitNow(); graphBackend.autoLayout(); canvas.fitView(); window.toolbarPinned = true } }
+            Rectangle { width: 1; height: 25; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
+            ToolIconButton { symbol: "¥"; hint: "显示建设造价"; selected: window.metric === "cost"; onClicked: { window.metric = "cost"; window.toolbarPinned = true } }
+            ToolIconButton { symbol: "◫"; hint: "显示传输容量"; selected: window.metric === "capacity"; accent: "#E9E3FB"; onClicked: { window.metric = "capacity"; window.toolbarPinned = true } }
+            ToolIconButton { symbol: "⊞"; hint: "显示或隐藏全部边权"; selected: canvas.showAllWeights; onClicked: { canvas.showAllWeights = !canvas.showAllWeights; window.toolbarPinned = true } }
+            ToolIconButton { symbol: "⛶"; hint: "适应视图"; onClicked: { canvas.fitView(); window.toolbarPinned = true } }
+        }
+        Rectangle {
+            anchors.top: editViewRow.bottom
+            anchors.topMargin: 5
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: 442; height: 1; color: "#EDF1F7"
+        }
+        Row {
+            anchors.top: editViewRow.bottom
+            anchors.topMargin: 9
+            anchors.horizontalCenter: parent.horizontalCenter
+            spacing: 5
+            Text {
+                text: "算法"; color: "#8A96AA"; font.pixelSize: 11; font.weight: Font.DemiBold
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            ToolIconButton { objectName: "primTool"; symbol: "✳"; hint: "Prim 最小生成树 · 再次点击退出演示"; selected: window.activeAlgorithm === "prim"; onClicked: { window.runAlgorithm("prim"); window.toolbarPinned = true } }
+            ToolIconButton { symbol: "◇"; hint: "Kruskal 最小生成树 · 再次点击退出演示"; selected: window.activeAlgorithm === "kruskal"; onClicked: { window.runAlgorithm("kruskal"); window.toolbarPinned = true } }
+            ToolIconButton { symbol: "⇢"; hint: "最大流 · 再次点击退出演示"; selected: window.activeAlgorithm === "flow"; accent: "#E9E3FB"; onClicked: { window.runAlgorithm("flow"); window.toolbarPinned = true } }
+            Rectangle { width: 1; height: 27; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "起点"; color: "#8A96AA"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+            SoftSpinBox { id: sourceBox; width: 88; height: 36; from: 1; to: 200; value: 1; onActiveFocusChanged: if (activeFocus) window.toolbarPinned = true; ToolTip.visible: hovered; ToolTip.text: "算法起点 · 可直接输入" }
+            Text { text: "终点"; color: "#8A96AA"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+            SoftSpinBox { id: sinkBox; width: 88; height: 36; from: 1; to: 200; value: 20; onActiveFocusChanged: if (activeFocus) window.toolbarPinned = true; ToolTip.visible: hovered; ToolTip.text: "最大流终点 · 可直接输入" }
         }
     }
 
     Rectangle {
         id: playback
         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
-        height: 118; color: "#FFFFFF"
+        height: window.activeAlgorithm.length > 0 ? 90 : 0
+        clip: true
+        color: "#FFFFFF"
+        Behavior on height { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
         Rectangle { anchors.top: parent.top; width: parent.width; height: 1; color: "#E7ECF4" }
         RowLayout {
             anchors.fill: parent
@@ -677,7 +791,7 @@ ApplicationWindow {
                 onMoved: { window.playing = false; window.stepIndex = Math.round(value) }
             }
             Text { text: window.traceSteps.length ? (window.stepIndex + 1) + " / " + window.traceSteps.length : "0 / 0"; color: "#8192A8"; font.pixelSize: 12 }
-            ComboBox { id: speedBox; model: ["0.5×", "1×", "2×"]; currentIndex: 1; Layout.preferredWidth: window.width < 1000 ? 75 : 92 }
+            SoftComboBox { id: speedBox; model: ["0.5×", "1×", "2×"]; currentIndex: 1; Layout.preferredWidth: window.width < 1000 ? 75 : 92 }
             SoftButton { text: "看结果"; enabled: window.traceSteps.length > 0; onClicked: { window.playing = false; window.stepIndex = window.traceSteps.length - 1 } }
             SoftButton {
                 text: window.treeOnly ? "恢复全图" : "只看最小树"

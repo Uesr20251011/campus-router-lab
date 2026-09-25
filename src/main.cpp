@@ -54,6 +54,13 @@ int main(int argc, char *argv[]) {
             } else if (state == QStringLiteral("network")) {
                 if (QObject *popup = window->findChild<QObject *>(QStringLiteral("networkPopup")))
                     QMetaObject::invokeMethod(popup, "open");
+            } else if (state == QStringLiteral("toolbar")) {
+                window->setProperty("toolbarPinned", true);
+            } else if (state == QStringLiteral("toolbar-selection")) {
+                window->setProperty("selectedNodeId", 4);
+                window->setProperty("toolbarPinned", true);
+            } else if (state == QStringLiteral("selection")) {
+                window->setProperty("selectedNodeId", 4);
             }
         }
         const int widthOption = app.arguments().indexOf("--screenshot-width");
