@@ -38,6 +38,7 @@ ApplicationWindow {
                                       && currentStep.selectedEdges.length === graphBackend.nodes.length - 1
     readonly property bool flowFinished: activeAlgorithm === "flow" && currentStep.kind === "finish"
     readonly property bool showFlowResult: flowFinished && showingDemo
+    readonly property bool shortestFinished: activeAlgorithm === "dijkstra" && currentStep.kind === "finish"
     onHasSelectionChanged: updateInspector()
     onActiveAlgorithmChanged: updateInspector()
     onNoticeChanged: if (notice.length > 0) noticeTimer.restart()
@@ -265,14 +266,21 @@ ApplicationWindow {
             ToolIconButton { symbol: "⌖"; hint: "选择与拖动 · Esc 返回此工具"; selected: window.activeTool === "select"; onClicked: window.activeTool = "select" }
             ToolIconButton { symbol: "＋"; hint: "添加节点 · 点击画布连续添加"; selected: window.activeTool === "node"; onClicked: window.activeTool = "node" }
             ToolIconButton { symbol: "↗"; hint: "连接节点 · 依次点击两个节点"; selected: window.activeTool === "link"; onClicked: window.activeTool = "link" }
-            ToolIconButton { symbol: "▣"; hint: "固定节点模式 · 拖动只移动当前节点"; selected: window.fixedNodes; accent: "#E9E3FB"; onClicked: window.fixedNodes = !window.fixedNodes }
-            ToolIconButton { symbol: "◎"; hint: "自动整理节点"; enabled: !window.fixedNodes; onClicked: { canvas.commitNow(); graphBackend.autoLayout(); canvas.fitView() } }
+            Rectangle { width: 1; height: 25; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
+            Row {
+                id: layoutTools
+                objectName: "layoutTools"
+                spacing: 4
+                Text { text: "布局"; color: "#8292A7"; font.pixelSize: 11; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
+                ToolIconButton { symbol: "▣"; hint: "固定节点模式 · 拖动只移动当前节点"; selected: window.fixedNodes; accent: "#E9E3FB"; onClicked: window.fixedNodes = !window.fixedNodes }
+                ToolIconButton { symbol: "◎"; hint: "自动排布节点"; enabled: !window.fixedNodes; onClicked: { canvas.commitNow(); graphBackend.autoLayout(); canvas.fitView() } }
+                ToolIconButton { symbol: "⛶"; hint: "适应视图"; onClicked: canvas.fitView() }
+            }
             Rectangle { width: 1; height: 25; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
             Text { text: "视图"; color: "#8292A7"; font.pixelSize: 11; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
             ToolIconButton { symbol: "¥"; hint: "显示建设造价"; selected: window.metric === "cost"; onClicked: window.metric = "cost" }
             ToolIconButton { symbol: "◫"; hint: "显示传输容量"; selected: window.metric === "capacity"; accent: "#E9E3FB"; onClicked: window.metric = "capacity" }
             ToolIconButton { symbol: "⊞"; hint: "显示或隐藏全部边权"; selected: canvas.showAllWeights; onClicked: canvas.showAllWeights = !canvas.showAllWeights }
-            ToolIconButton { symbol: "⛶"; hint: "适应视图"; onClicked: canvas.fitView() }
         }
         Row {
             id: headerActions
@@ -313,12 +321,13 @@ ApplicationWindow {
             Text { text: "算法"; color: "#8292A7"; font.pixelSize: 11; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
             ToolIconButton { objectName: "primTool"; symbol: "✳"; hint: "Prim 最小生成树 · 再次点击退出演示"; selected: window.activeAlgorithm === "prim"; onClicked: window.runAlgorithm("prim") }
             ToolIconButton { symbol: "◇"; hint: "Kruskal 最小生成树 · 再次点击退出演示"; selected: window.activeAlgorithm === "kruskal"; onClicked: window.runAlgorithm("kruskal") }
+            ToolIconButton { objectName: "dijkstraTool"; symbol: "⌁"; hint: "Dijkstra 最短路径 · 使用起点和终点"; selected: window.activeAlgorithm === "dijkstra"; accent: "#E5F1FF"; onClicked: window.runAlgorithm("dijkstra") }
             ToolIconButton { symbol: "⇢"; hint: "最大流 · 再次点击退出演示"; selected: window.activeAlgorithm === "flow"; accent: "#E9E3FB"; onClicked: window.runAlgorithm("flow") }
             Rectangle { width: 1; height: 27; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
             Text { text: "起点"; color: "#8292A7"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
-            SoftSpinBox { id: sourceBox; width: 88; height: 36; from: 1; to: 200; value: 1; ToolTip.visible: hovered; ToolTip.text: "算法起点 · 可直接输入" }
+            SoftSpinBox { id: sourceBox; objectName: "sourceBox"; width: 88; height: 36; from: 1; to: 200; value: 1; ToolTip.visible: hovered; ToolTip.text: "Prim、Dijkstra 和最大流的起点 · 可直接输入" }
             Text { text: "终点"; color: "#8292A7"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
-            SoftSpinBox { id: sinkBox; width: 88; height: 36; from: 1; to: 200; value: 20; ToolTip.visible: hovered; ToolTip.text: "最大流终点 · 可直接输入" }
+            SoftSpinBox { id: sinkBox; objectName: "sinkBox"; width: 88; height: 36; from: 1; to: 200; value: 20; ToolTip.visible: hovered; ToolTip.text: "Dijkstra 和最大流的终点 · 可直接输入" }
         }
         Text {
             anchors.right: parent.right; anchors.rightMargin: 24
@@ -482,6 +491,9 @@ ApplicationWindow {
                             : window.activeAlgorithm === "flow"
                             ? [{name:"探索",tone:"#EAA668"}, {name:"通路",tone:"#50BDA7"},
                                {name:"逆向",tone:"#876BDB"}, {name:"余量0",tone:"#AEB8C8"}]
+                            : window.activeAlgorithm === "dijkstra"
+                            ? [{name:"已确定",tone:"#68C1AC"}, {name:"考察",tone:"#EAA668"},
+                               {name:"当前路径",tone:"#50BDA7"}]
                             : [{name:"已选",tone:"#68C1AC"}, {name:"当前",tone:"#F0B477"}]
                         delegate: Row {
                             spacing: 5
@@ -530,13 +542,16 @@ ApplicationWindow {
                 width: parent.width
                 spacing: 11
                 Text {
-                    text: window.showingProperty ? "属性编辑" : window.showFlowResult ? "最大流结果" : "算法演示"
+                    text: window.showingProperty ? "属性编辑" : window.showFlowResult ? "最大流结果"
+                          : window.shortestFinished ? "最短路径结果" : "算法演示"
                     color: "#344862"; font.pixelSize: 16; font.weight: Font.DemiBold
                 }
                 Text {
                     text: window.showingProperty ? "修改选中节点或链路" : window.showFlowResult
-                          ? "总流量 " + window.currentStep.value + " 包/秒" : "跟随步骤查看算法过程"
-                    color: window.showFlowResult ? "#45A996" : "#94A2B5"; font.pixelSize: 12
+                          ? "总流量 " + window.currentStep.value + " 包/秒"
+                          : window.shortestFinished ? "总造价 " + window.currentStep.value
+                          : "跟随步骤查看算法过程"
+                    color: window.showFlowResult || window.shortestFinished ? "#45A996" : "#94A2B5"; font.pixelSize: 12
                 }
                 RowLayout {
                     visible: window.hasSelection && window.activeAlgorithm.length > 0
@@ -614,7 +629,33 @@ ApplicationWindow {
                         Text { width: parent.width; text: window.currentStep.detail || "算法经过的节点和链路会在画布上依次亮起。"; color: "#7D90A9"; font.pixelSize: 12; wrapMode: Text.Wrap }
                     }
                 }
-                Text { visible: window.showingDemo && !window.showFlowResult && window.stepIndex >= 0; text: (window.activeAlgorithm === "flow" ? "当前流量  " : "累计造价  ") + (window.currentStep.value || 0); color: "#57AF9C"; font.pixelSize: 17; font.weight: Font.Bold }
+                Text {
+                    visible: window.showingDemo && !window.showFlowResult && window.stepIndex >= 0
+                    text: window.activeAlgorithm === "dijkstra"
+                          ? "当前路径距离  " + (window.currentStep.value >= 0 ? window.currentStep.value : "∞")
+                          : (window.activeAlgorithm === "flow" ? "当前流量  " : "累计造价  ") + (window.currentStep.value || 0)
+                    color: "#57AF9C"; font.pixelSize: 17; font.weight: Font.Bold
+                }
+                Text {
+                    visible: window.showingDemo && window.activeAlgorithm === "dijkstra" && !window.shortestFinished
+                    Layout.fillWidth: true; wrapMode: Text.Wrap
+                    text: "节点下方是暂定距离；绿色节点已确定，橙色路径正在考察。"
+                    color: "#8494AA"; font.pixelSize: 11
+                }
+                Rectangle {
+                    visible: window.showingDemo && window.shortestFinished
+                    Layout.fillWidth: true; Layout.preferredHeight: 78
+                    radius: 13; color: "#ECF8F3"; border.color: "#BCE5D4"
+                    Column {
+                        anchors.fill: parent; anchors.margins: 11; spacing: 4
+                        Text { text: "最终最短路径"; color: "#2A947D"; font.pixelSize: 12; font.weight: Font.DemiBold }
+                        Text {
+                            width: parent.width; wrapMode: Text.WrapAnywhere
+                            text: (window.currentStep.pathNodes || []).map(id => "R" + id).join(" → ")
+                            color: "#42687A"; font.pixelSize: 12
+                        }
+                    }
+                }
                 Text {
                     visible: window.showingDemo && !window.showFlowResult && window.activeAlgorithm === "flow" && window.stepIndex >= 0
                     Layout.fillWidth: true; wrapMode: Text.Wrap
@@ -694,7 +735,7 @@ ApplicationWindow {
             Column {
                 spacing: 2
                 Text { text: "算法回放"; color: "#344862"; font.pixelSize: 14; font.weight: Font.DemiBold }
-                Text { text: window.activeAlgorithm === "flow" ? "最大流" : window.activeAlgorithm === "prim" ? "Prim" : window.activeAlgorithm === "kruskal" ? "Kruskal" : "选择算法后播放"; color: "#9EACC0"; font.pixelSize: 11 }
+                Text { text: window.activeAlgorithm === "flow" ? "最大流" : window.activeAlgorithm === "prim" ? "Prim" : window.activeAlgorithm === "kruskal" ? "Kruskal" : window.activeAlgorithm === "dijkstra" ? "Dijkstra 最短路" : "选择算法后播放"; color: "#9EACC0"; font.pixelSize: 11 }
             }
             SoftButton { compact: true; symbol: "↞"; enabled: window.stepIndex > 0; onClicked: { window.playing = false; window.stepIndex-- } }
             SoftButton { compact: true; symbol: window.playing ? "Ⅱ" : "▶"; selected: true; enabled: window.traceSteps.length > 0; onClicked: window.playing = !window.playing }

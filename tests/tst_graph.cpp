@@ -17,6 +17,8 @@ private slots:
     void finalFlowIsDecomposedIntoVisibleRoutes();
     void savedPresetRestoresEditedNetwork();
     void randomNetworkStaysConnected();
+    void primUsesChosenStartAndDijkstraAnimatesShortestRoute();
+    void dijkstraRespectsDirectionAndReportsUnreachableTarget();
 };
 
 void GraphTests::figure2HasMinimumCost41() {
@@ -45,6 +47,54 @@ void GraphTests::figure3HasMaximumFlow13() {
     for (const auto &step : flow.steps)
         hasPath |= step.pathNodes.size() >= 2;
     QVERIFY(hasPath);
+}
+
+void GraphTests::primUsesChosenStartAndDijkstraAnimatesShortestRoute() {
+    GraphBackend backend;
+    backend.loadCostSample();
+    const QVariantList primSteps = backend.run(QStringLiteral("prim"), 4, 8).value("steps").toList();
+    QVERIFY(!primSteps.isEmpty());
+    QVERIFY(primSteps.first().toMap().value("title").toString().contains(QStringLiteral("R4")));
+
+    const QVariantMap result = backend.run(QStringLiteral("dijkstra"), 1, 8);
+    QVERIFY(result.value("success").toBool());
+    QCOMPARE(result.value("value").toLongLong(), qint64(23));
+    const QVariantList steps = result.value("steps").toList();
+    QVERIFY(steps.size() > 8);
+    QCOMPARE(steps.first().toMap().value("kind").toString(), QStringLiteral("start"));
+    const QVariantList initialDistances = steps.first().toMap().value("distances").toList();
+    QCOMPARE(initialDistances.size(), 8);
+    QCOMPARE(initialDistances.first().toLongLong(), qint64(0));
+    QCOMPARE(initialDistances.last().toLongLong(), qint64(-1));
+    bool considered = false, relaxed = false, settled = false;
+    for (const QVariant &item : steps) {
+        const QVariantMap step = item.toMap();
+        considered |= step.value("kind") == QStringLiteral("consider") && step.value("activeEdge").toInt() > 0;
+        relaxed |= step.value("kind") == QStringLiteral("relax") && !step.value("pathEdges").toList().isEmpty();
+        settled |= step.value("kind") == QStringLiteral("settle") && !step.value("visitedNodes").toList().isEmpty();
+    }
+    QVERIFY(considered);
+    QVERIFY(relaxed);
+    QVERIFY(settled);
+    const QVariantMap finish = steps.last().toMap();
+    QCOMPARE(finish.value("kind").toString(), QStringLiteral("finish"));
+    QCOMPARE(finish.value("pathNodes").toList(), QVariantList({1, 4, 7, 8}));
+    QCOMPARE(finish.value("pathEdges").toList(), QVariantList({2, 9, 15}));
+    QCOMPARE(finish.value("distances").toList().last().toLongLong(), qint64(23));
+}
+
+void GraphTests::dijkstraRespectsDirectionAndReportsUnreachableTarget() {
+    GraphBackend backend;
+    backend.generateCampus(2);
+    QVERIFY(backend.removeLink(1));
+    QVERIFY(backend.addLink(1, 2, 3, 0, true) > 0);
+    const QVariantMap forward = backend.run(QStringLiteral("dijkstra"), 1, 2);
+    QVERIFY(forward.value("success").toBool());
+    QCOMPARE(forward.value("value").toLongLong(), qint64(3));
+    const QVariantMap backward = backend.run(QStringLiteral("dijkstra"), 2, 1);
+    QVERIFY(!backward.value("success").toBool());
+    QVERIFY(backward.value("error").toString().contains(QStringLiteral("无法到达")));
+    QCOMPARE(backward.value("steps").toList().last().toMap().value("kind").toString(), QStringLiteral("error"));
 }
 
 void GraphTests::disconnectedGraphCannotHaveSpanningTree() {

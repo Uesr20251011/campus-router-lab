@@ -2,6 +2,7 @@
 
 #include <QHash>
 #include <QSet>
+#include <QStringList>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -268,6 +269,131 @@ Trace runKruskal(const Graph &graph) {
     result.steps.append(makeStep(QStringLiteral("finish"), QStringLiteral("最低造价：%1").arg(total),
                                  QStringLiteral("用 %1 条链路连接全部路由器").arg(selected.size()),
                                  visited, selected, total));
+    return result;
+}
+
+Trace runDijkstra(const Graph &graph, int source, int sink) {
+    Trace result;
+    const auto indices = indicesOf(graph);
+    if (!indices.contains(source) || !indices.contains(sink)) {
+        result.error = QStringLiteral("请选择存在的起点和终点");
+        return result;
+    }
+
+    const int count = graph.nodes.size();
+    const int start = indices.value(source), goal = indices.value(sink);
+    const qint64 infinity = std::numeric_limits<qint64>::max() / 4;
+    QVector<qint64> distance(count, infinity);
+    QVector<int> previousNode(count, -1), previousEdge(count, -1);
+    QVector<char> settled(count, false);
+    QVector<int> settledOrder;
+    distance[start] = 0;
+
+    auto routeTo = [&](int target) -> std::pair<QVector<int>, QVector<int>> {
+        QVector<int> nodes, edges;
+        for (int at = target, depth = 0; depth <= count; ++depth) {
+            nodes.append(graph.nodes[at].id);
+            if (at == start) {
+                std::reverse(nodes.begin(), nodes.end());
+                std::reverse(edges.begin(), edges.end());
+                return {nodes, edges};
+            }
+            if (previousNode[at] < 0) break;
+            edges.append(previousEdge[at]);
+            at = previousNode[at];
+        }
+        return {};
+    };
+    auto record = [&](const QString &kind, const QString &title, const QString &detail,
+                      int focus, int active = -1, int rejected = -1) {
+        QVector<int> chosen;
+        for (int i = 0; i < count; ++i)
+            if (settled[i] && previousEdge[i] >= 0) chosen.append(previousEdge[i]);
+        TraceStep step = makeStep(kind, title, detail, settledOrder, chosen,
+                                  focus >= 0 && distance[focus] < infinity ? distance[focus] : -1,
+                                  active, rejected);
+        for (qint64 value : distance) step.distances.append(value < infinity ? value : -1);
+        if (focus >= 0 && distance[focus] < infinity) {
+            const auto route = routeTo(focus);
+            step.pathNodes = route.first;
+            step.pathEdges = route.second;
+        }
+        return step;
+    };
+
+    result.steps.append(record(QStringLiteral("start"),
+                               QStringLiteral("从 R%1 出发").arg(source),
+                               QStringLiteral("起点距离为 0，目标是 R%1；∞ 表示尚未找到路径").arg(sink), start));
+    while (true) {
+        int current = -1;
+        for (int i = 0; i < count; ++i)
+            if (!settled[i] && distance[i] < infinity &&
+                (current < 0 || distance[i] < distance[current] ||
+                 (distance[i] == distance[current] && graph.nodes[i].id < graph.nodes[current].id)))
+                current = i;
+        if (current < 0) break;
+
+        settled[current] = true;
+        settledOrder.append(graph.nodes[current].id);
+        result.steps.append(record(QStringLiteral("settle"),
+                                   QStringLiteral("确定 R%1 的最短距离").arg(graph.nodes[current].id),
+                                   QStringLiteral("从未确定节点中选距离最小者：%1").arg(distance[current]), current));
+        if (current == goal) break;
+
+        for (const auto &link : graph.links) {
+            if (!link.hasCost) continue;
+            int neighbor = -1;
+            if (link.u == graph.nodes[current].id) neighbor = indices.value(link.v, -1);
+            else if (!link.directed && link.v == graph.nodes[current].id)
+                neighbor = indices.value(link.u, -1);
+            if (neighbor < 0 || settled[neighbor]) continue;
+            const qint64 candidate = link.cost <= infinity - distance[current]
+                                         ? distance[current] + link.cost : infinity;
+            TraceStep considering = record(QStringLiteral("consider"),
+                                           QStringLiteral("考察 R%1 → R%2")
+                                               .arg(graph.nodes[current].id).arg(graph.nodes[neighbor].id),
+                                           QStringLiteral("距离 %1 + 边权 %2 = 候选 %3")
+                                               .arg(distance[current]).arg(link.cost).arg(candidate),
+                                           current, link.id);
+            considering.pathNodes.append(graph.nodes[neighbor].id);
+            considering.pathEdges.append(link.id);
+            result.steps.append(considering);
+
+            if (candidate < distance[neighbor]) {
+                distance[neighbor] = candidate;
+                previousNode[neighbor] = current;
+                previousEdge[neighbor] = link.id;
+                result.steps.append(record(QStringLiteral("relax"),
+                                           QStringLiteral("更新 R%1：%2").arg(graph.nodes[neighbor].id).arg(candidate),
+                                           QStringLiteral("找到更短路线，暂定距离改为 %1").arg(candidate),
+                                           neighbor, link.id));
+            } else {
+                result.steps.append(record(QStringLiteral("reject"),
+                                           QStringLiteral("保留 R%1 的原距离").arg(graph.nodes[neighbor].id),
+                                           QStringLiteral("候选路线没有更短，当前距离仍为 %1")
+                                               .arg(distance[neighbor]), current, -1, link.id));
+            }
+        }
+    }
+
+    if (distance[goal] >= infinity) {
+        result.error = QStringLiteral("R%1 无法到达 R%2").arg(source).arg(sink);
+        TraceStep failed = record(QStringLiteral("error"), QStringLiteral("终点不可达"),
+                                  result.error, -1);
+        failed.value = -1;
+        result.steps.append(failed);
+        return result;
+    }
+    result.success = true;
+    result.value = distance[goal];
+    TraceStep finish = record(QStringLiteral("finish"),
+                              QStringLiteral("最短距离：%1").arg(result.value),
+                              QString(), goal);
+    finish.selectedEdges = finish.pathEdges;
+    QStringList labels;
+    for (int node : finish.pathNodes) labels.append(QStringLiteral("R%1").arg(node));
+    finish.detail = labels.join(QStringLiteral(" → "));
+    result.steps.append(finish);
     return result;
 }
 

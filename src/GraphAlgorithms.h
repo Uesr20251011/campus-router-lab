@@ -47,6 +47,8 @@ struct TraceStep {
     QVector<int> visitedNodes;
     QVector<int> selectedEdges;
     QVector<int> pathNodes;
+    QVector<int> pathEdges;
+    QVector<qint64> distances;
     QVector<qint64> linkFlows;
     QVector<ResidualArcState> residualArcs;
     QVector<ResidualArcState> pathArcs;
@@ -70,4 +72,5 @@ Graph sampleCampusGraph(int count = 20);
 Graph forceDirectedLayout(const Graph &graph, double width = 940, double height = 610);
 Trace runPrim(const Graph &graph, int start);
 Trace runKruskal(const Graph &graph);
+Trace runDijkstra(const Graph &graph, int source, int sink);
 Trace runMaxFlow(const Graph &graph, int source, int sink);

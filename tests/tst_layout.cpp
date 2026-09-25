@@ -28,8 +28,9 @@ private slots:
         auto *toolbar = window->findChild<QQuickItem *>("mainToolbar");
         auto *editTools = window->findChild<QQuickItem *>("editViewTools");
         auto *algorithmTools = window->findChild<QQuickItem *>("algorithmTools");
+        auto *layoutTools = window->findChild<QQuickItem *>("layoutTools");
         auto *headerActions = window->findChild<QQuickItem *>("headerActions");
-        QVERIFY(card && canvas && toolbar && editTools && algorithmTools && headerActions);
+        QVERIFY(card && canvas && toolbar && editTools && algorithmTools && layoutTools && headerActions);
         QCOMPARE(toolbar->height(), 96.0);
         QVERIFY(editTools->x() + editTools->width() < headerActions->x());
         QVERIFY(algorithmTools->x() + algorithmTools->width() < window->width());
@@ -87,6 +88,26 @@ private slots:
         QCOMPARE(toolbar->height(), 96.0);
         clickPrim();
         QTRY_COMPARE(window->property("activeAlgorithm").toString(), QString());
+        auto *sourceBox = window->findChild<QQuickItem *>("sourceBox");
+        auto *sinkBox = window->findChild<QQuickItem *>("sinkBox");
+        auto *dijkstra = window->findChild<QQuickItem *>("dijkstraTool");
+        QVERIFY(sourceBox && sinkBox && dijkstra);
+        sourceBox->setProperty("value", 4);
+        sinkBox->setProperty("value", 8);
+        clickPrim();
+        QTRY_COMPARE(window->property("activeAlgorithm").toString(), QStringLiteral("prim"));
+        QVERIFY(window->property("traceSteps").toList().first().toMap().value("title").toString()
+                    .contains(QStringLiteral("R4")));
+        clickPrim();
+        QTRY_COMPARE(window->property("activeAlgorithm").toString(), QString());
+        const QPointF scene = dijkstra->mapToScene(QPointF(dijkstra->width() / 2, dijkstra->height() / 2));
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, scene.toPoint());
+        QTRY_COMPARE(window->property("activeAlgorithm").toString(), QStringLiteral("dijkstra"));
+        const QVariantMap finish = window->property("traceSteps").toList().last().toMap();
+        QCOMPARE(finish.value("kind").toString(), QStringLiteral("finish"));
+        QCOMPARE(finish.value("pathNodes").toList().first().toInt(), 4);
+        QCOMPARE(finish.value("pathNodes").toList().last().toInt(), 8);
+        QCOMPARE(finish.value("distances").toList().size(), 20);
     }
 };
 

@@ -69,6 +69,7 @@ Item {
         return available
     }
     function pathHas(link) {
+        if (algorithm === "dijkstra") return has(step.pathEdges, link.id)
         if (algorithm === "flow" && step.pathArcs) {
             for (const arc of step.pathArcs)
                 if (arc.linkId === link.id && !arc.reverse) return true
@@ -303,8 +304,10 @@ Item {
                     const flow = root.step.linkFlows && root.step.linkFlows.length > i ? root.step.linkFlows[i] : 0
                     const remaining = flowMode ? root.forwardResidual(link) : link.capacity
                     const exhausted = flowMode && remaining <= 0
+                    const exploringPath = root.step.kind === "search" ||
+                                          (root.algorithm === "dijkstra" && root.step.kind === "consider")
                     const tone = exhausted ? "#AEB8C8" : selected ? "#7A66D8" : onPath
-                        ? (root.step.kind === "search" ? "#EAA668" : "#50BDA7")
+                        ? (exploringPath ? "#EAA668" : "#50BDA7")
                         : active ? "#F0B477" : rejected ? "#E693A4" : chosen ? "#68C1AC"
                         : hovered ? "#6D9FC8" : link.directed ? "#7D9FC9" : "#BDCADC"
                     const thickness = selected || onPath ? 5.5 : active || chosen || hovered ? 4.5 : link.directed ? 3.3 : 2.5
@@ -410,7 +413,7 @@ Item {
                         labelFill = "#FFF0DE"; labelStroke = "#F0B477"; labelInk = "#A36A30"; labelBorder = 2
                     }
                     if (onPath) {
-                        const searching = root.step.kind === "search"
+                        const searching = exploringPath
                         labelFill = searching ? "#FFF0DE" : "#E3F7F0"
                         labelStroke = searching ? "#EAA668" : "#50BDA7"
                         labelInk = searching ? "#A36A30" : "#268B79"
@@ -446,6 +449,10 @@ Item {
                 property bool inPath: root.has(root.step.pathNodes, nodeId)
                 property bool visited: root.has(root.step.visitedNodes, nodeId)
                 property bool searchingFlow: root.algorithm === "flow" && root.step.kind === "search"
+                property bool consideringPath: root.algorithm === "dijkstra" && root.step.kind === "consider"
+                property int tentativeDistance: root.algorithm === "dijkstra" && root.step.distances
+                                                && root.step.distances.length > index
+                                                ? Number(root.step.distances[index]) : -1
                 property bool edgeFocused: {
                     const activeLink = root.linkById(root.hoveredLink >= 0 ? root.hoveredLink : root.selectedLink)
                     return !!activeLink && (activeLink.u === nodeId || activeLink.v === nodeId)
@@ -462,16 +469,16 @@ Item {
                 Rectangle {
                     anchors.centerIn: parent
                     width: 75; height: 75; radius: 38
-                    color: nodeBody.inPath ? (nodeBody.searchingFlow ? "#29EAA668" : root.algorithm === "flow" ? "#2950BDA7" : "#298D77E0")
+                    color: nodeBody.inPath ? (nodeBody.searchingFlow || nodeBody.consideringPath ? "#29EAA668" : root.algorithm === "flow" || root.algorithm === "dijkstra" ? "#2950BDA7" : "#298D77E0")
                                            : root.selectedNode === nodeBody.nodeId || nodeBody.edgeFocused ? "#267BCBB9" : "transparent"
                 }
                 Rectangle {
                     anchors.fill: parent
                     radius: 31
-                    color: nodeBody.inPath ? (nodeBody.searchingFlow ? "#FFF0DB" : root.algorithm === "flow" ? "#D8F7ED" : "#E7DFFF")
+                    color: nodeBody.inPath ? (nodeBody.searchingFlow || nodeBody.consideringPath ? "#FFF0DB" : root.algorithm === "flow" || root.algorithm === "dijkstra" ? "#D8F7ED" : "#E7DFFF")
                                            : nodeBody.visited ? "#D8F5EB" : root.selectedNode === nodeBody.nodeId || nodeBody.edgeFocused ? "#DDF5ED" : "#FFFFFF"
                     border.width: root.selectedNode === nodeBody.nodeId || nodeBody.inPath || nodeBody.edgeFocused ? 3 : 2
-                    border.color: nodeBody.inPath ? (nodeBody.searchingFlow ? "#EAA668" : root.algorithm === "flow" ? "#50BDA7" : "#9B84E3")
+                    border.color: nodeBody.inPath ? (nodeBody.searchingFlow || nodeBody.consideringPath ? "#EAA668" : root.algorithm === "flow" || root.algorithm === "dijkstra" ? "#50BDA7" : "#9B84E3")
                                                   : root.selectedNode === nodeBody.nodeId || nodeBody.edgeFocused ? "#66BDA7" : "#CFD9E8"
                     Behavior on color { ColorAnimation { duration: 200 } }
                 }
@@ -485,6 +492,20 @@ Item {
                     font.weight: Font.DemiBold
                     horizontalAlignment: Text.AlignHCenter
                     elide: Text.ElideRight
+                }
+                Rectangle {
+                    objectName: "distanceBadge"
+                    visible: root.algorithm === "dijkstra" && root.step.distances
+                             && root.step.distances.length > index
+                    x: 12; y: 60; width: 38; height: 20; radius: 9
+                    color: nodeBody.visited ? "#E5F8F0" : nodeBody.tentativeDistance < 0 ? "#F2F5FA" : "#FFF2E2"
+                    border.color: nodeBody.visited ? "#90CFBC" : nodeBody.tentativeDistance < 0 ? "#DCE5F0" : "#F0CC9F"
+                    Text {
+                        anchors.centerIn: parent
+                        text: nodeBody.tentativeDistance < 0 ? "∞" : String(nodeBody.tentativeDistance)
+                        color: nodeBody.visited ? "#278D78" : nodeBody.tentativeDistance < 0 ? "#91A0B4" : "#A36A30"
+                        font.pixelSize: 11; font.weight: Font.DemiBold
+                    }
                 }
                 MouseArea {
                     anchors.fill: parent

@@ -26,6 +26,8 @@ int main(int argc, char *argv[]) {
             QObject *window = engine.rootObjects().first();
             if (state == QStringLiteral("flow") || state == QStringLiteral("flow-finish")) {
                 backend.loadFlowSample();
+                if (QObject *sinkBox = window->findChild<QObject *>(QStringLiteral("sinkBox")))
+                    sinkBox->setProperty("value", 8);
                 const QVariantMap trace = backend.run(QStringLiteral("flow"), 1, 8);
                 window->setProperty("activeAlgorithm", "flow");
                 window->setProperty("metric", "capacity");
@@ -37,6 +39,21 @@ int main(int argc, char *argv[]) {
                         index = i; break;
                     }
                 window->setProperty("stepIndex", state == QStringLiteral("flow-finish") ? steps.size() - 1 : index);
+            } else if (state == QStringLiteral("dijkstra") || state == QStringLiteral("dijkstra-finish")) {
+                backend.loadCostSample();
+                if (QObject *sinkBox = window->findChild<QObject *>(QStringLiteral("sinkBox")))
+                    sinkBox->setProperty("value", 8);
+                const QVariantMap trace = backend.run(QStringLiteral("dijkstra"), 1, 8);
+                window->setProperty("activeAlgorithm", "dijkstra");
+                window->setProperty("metric", "cost");
+                window->setProperty("traceSteps", trace.value("steps"));
+                const QVariantList steps = trace.value("steps").toList();
+                int index = 0;
+                for (int i = 0; i < steps.size(); ++i)
+                    if (steps[i].toMap().value("kind") == QStringLiteral("relax")) {
+                        index = i; break;
+                    }
+                window->setProperty("stepIndex", state == QStringLiteral("dijkstra-finish") ? steps.size() - 1 : index);
             } else if (state == QStringLiteral("tree")) {
                 backend.loadCostSample();
                 const QVariantMap trace = backend.run(QStringLiteral("prim"), 1, 8);

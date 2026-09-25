@@ -336,6 +336,7 @@ QVariantMap GraphBackend::run(const QString &algorithm, int source, int sink) co
     Trace trace;
     if (algorithm == QStringLiteral("prim")) trace = runPrim(m_graph, source);
     else if (algorithm == QStringLiteral("kruskal")) trace = runKruskal(m_graph);
+    else if (algorithm == QStringLiteral("dijkstra")) trace = runDijkstra(m_graph, source, sink);
     else if (algorithm == QStringLiteral("flow")) trace = runMaxFlow(m_graph, source, sink);
     else trace.error = QStringLiteral("未知算法");
     QVariantList steps;
@@ -344,6 +345,8 @@ QVariantMap GraphBackend::run(const QString &algorithm, int source, int sink) co
                                  {"visitedNodes", integers(item.visitedNodes)},
                                  {"selectedEdges", integers(item.selectedEdges)},
                                  {"pathNodes", integers(item.pathNodes)},
+                                 {"pathEdges", integers(item.pathEdges)},
+                                 {"distances", flows(item.distances)},
                                  {"linkFlows", flows(item.linkFlows)},
                                  {"residualArcs", arcs(item.residualArcs)},
                                  {"pathArcs", arcs(item.pathArcs)},
