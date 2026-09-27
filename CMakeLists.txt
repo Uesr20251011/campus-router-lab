@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(CampusRouterLab VERSION 1.4.0 LANGUAGES CXX)
+project(CampusRouterLab VERSION 1.4.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,6 +24,15 @@ endif()
 qt_add_executable(campus_router ${app_sources})
 set_target_properties(campus_router PROPERTIES WIN32_EXECUTABLE TRUE)
 qt_add_resources(campus_router "app_icons" PREFIX "/" FILES assets/app-icon.png)
+set(toolbar_icon_files
+    assets/toolbar/hand.png
+    assets/toolbar/link.png
+    assets/toolbar/pin.png
+    assets/toolbar/cost.png
+    assets/toolbar/gauge.png
+    assets/toolbar/disk.png
+)
+qt_add_resources(campus_router "toolbar_icons" PREFIX "/" FILES ${toolbar_icon_files})
 qt_add_qml_module(campus_router
     URI CampusRouter
     VERSION 1.0
@@ -35,6 +44,7 @@ qt_add_qml_module(campus_router
         qml/SoftComboBox.qml
         qml/SoftTextField.qml
         qml/ToolIconButton.qml
+        qml/ToolbarGlyph.qml
         qml/WindowControl.qml
 )
 target_link_libraries(campus_router PRIVATE router_core Qt6::Quick Qt6::QuickControls2)
@@ -52,6 +62,7 @@ add_test(NAME canvas_tests COMMAND canvas_tests)
 set_tests_properties(canvas_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QUICK_BACKEND=software")
 
 qt_add_executable(layout_tests tests/tst_layout.cpp)
+qt_add_resources(layout_tests "toolbar_icons_test" PREFIX "/" FILES ${toolbar_icon_files})
 target_link_libraries(layout_tests PRIVATE router_core Qt6::Quick Qt6::QuickControls2 Qt6::Test)
 target_compile_definitions(layout_tests PRIVATE QML_MAIN_PATH="${CMAKE_CURRENT_SOURCE_DIR}/qml/Main.qml")
 add_test(NAME layout_tests COMMAND layout_tests)

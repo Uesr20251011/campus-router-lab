@@ -4,14 +4,15 @@ import QtQuick.Controls
 Button {
     id: control
     property string symbol: ""
+    property string iconName: ""
     property bool selected: false
     property bool compact: false
     property color accent: "#7BCBB9"
     hoverEnabled: true
     implicitHeight: compact ? 36 : 42
     implicitWidth: compact
-                   ? Math.max(42, label.implicitWidth + (symbolText.visible ? symbolText.implicitWidth + 8 : 0) + 24)
-                   : Math.max(104, label.implicitWidth + (symbolText.visible ? symbolText.implicitWidth + 12 : 0) + 34)
+                   ? Math.max(42, label.implicitWidth + (iconName.length > 0 ? 26 : symbolText.visible ? symbolText.implicitWidth + 8 : 0) + 24)
+                   : Math.max(104, label.implicitWidth + (iconName.length > 0 ? 30 : symbolText.visible ? symbolText.implicitWidth + 12 : 0) + 34)
 
     background: Rectangle {
         radius: 14
@@ -26,11 +27,19 @@ Button {
         anchors.centerIn: parent
         Text {
             id: symbolText
-            visible: control.symbol.length > 0
+            visible: control.symbol.length > 0 && control.iconName.length === 0
             text: control.symbol
             color: control.selected ? "#173D3B" : "#61738C"
             font.family: "Segoe UI Symbol"
             font.pixelSize: control.compact ? 17 : 16
+            anchors.verticalCenter: parent.verticalCenter
+        }
+        ToolbarGlyph {
+            visible: control.iconName.length > 0
+            width: control.compact ? 18 : 20
+            height: width
+            kind: control.iconName
+            enabled: control.enabled
             anchors.verticalCenter: parent.verticalCenter
         }
         Text {

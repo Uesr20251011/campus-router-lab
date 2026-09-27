@@ -256,9 +256,9 @@ ApplicationWindow {
             anchors.top: parent.top; anchors.topMargin: 7
             spacing: 4
             Text { text: "编辑"; color: "#8292A7"; font.pixelSize: 11; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
-            ToolIconButton { symbol: "⌖"; hint: "选择与拖动 · Esc 返回此工具"; selected: window.activeTool === "select"; onClicked: window.activeTool = "select" }
+            ToolIconButton { iconName: "hand"; hint: "选择与拖动 · Esc 返回此工具"; selected: window.activeTool === "select"; onClicked: window.activeTool = "select" }
             ToolIconButton { symbol: "＋"; hint: "添加节点 · 点击画布连续添加"; selected: window.activeTool === "node"; onClicked: window.activeTool = "node" }
-            ToolIconButton { symbol: "↗"; hint: "连接节点 · 依次点击两个节点"; selected: window.activeTool === "link"; onClicked: window.activeTool = "link" }
+            ToolIconButton { iconName: "link"; hint: "连接节点 · 依次点击两个节点"; selected: window.activeTool === "link"; onClicked: window.activeTool = "link" }
             Rectangle { width: 1; height: 25; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
             Text { text: "属性"; color: "#8292A7"; font.pixelSize: 11; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
             ToolIconButton { objectName: "propertyPanelTool"; symbol: "✎"; hint: window.propertyPanePinned ? "结束属性编辑" : "编辑属性 · 展开右侧属性栏并保持"; selected: window.propertyPanePinned; onClicked: window.propertyPanePinned = !window.propertyPanePinned }
@@ -268,15 +268,15 @@ ApplicationWindow {
                 objectName: "layoutTools"
                 spacing: 4
                 Text { text: "布局"; color: "#8292A7"; font.pixelSize: 11; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
-                ToolIconButton { symbol: "▣"; hint: "固定节点模式 · 拖动只移动当前节点"; selected: window.fixedNodes; accent: "#E9E3FB"; onClicked: window.fixedNodes = !window.fixedNodes }
+                ToolIconButton { iconName: "pin"; hint: "固定节点模式 · 拖动只移动当前节点"; selected: window.fixedNodes; onClicked: window.fixedNodes = !window.fixedNodes }
                 ToolIconButton { symbol: "◎"; hint: "自动排布节点"; enabled: !window.fixedNodes; onClicked: { canvas.commitNow(); graphBackend.autoLayout(); canvas.fitView() } }
                 ToolIconButton { symbol: "⛶"; hint: "适应视图"; onClicked: canvas.fitView() }
             }
             Rectangle { width: 1; height: 25; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
             Text { text: "视图"; color: "#8292A7"; font.pixelSize: 11; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
-            ToolIconButton { symbol: "¥"; hint: "显示建设造价"; selected: window.metric === "cost"; onClicked: window.metric = "cost" }
-            ToolIconButton { symbol: "◫"; hint: "显示传输容量"; selected: window.metric === "capacity"; accent: "#E9E3FB"; onClicked: window.metric = "capacity" }
-            ToolIconButton { symbol: "⊞"; hint: canvas.showAllWeights ? "隐藏全部边权" : "显示全部边权"; selected: canvas.showAllWeights; onClicked: canvas.showAllWeights = !canvas.showAllWeights }
+            ToolIconButton { iconName: "cost"; hint: "显示建设造价"; selected: window.metric === "cost"; onClicked: window.metric = "cost" }
+            ToolIconButton { iconName: "gauge"; hint: "显示传输容量"; selected: window.metric === "capacity"; onClicked: window.metric = "capacity" }
+            ToolIconButton { symbol: "All"; symbolSize: 13; hint: canvas.showAllWeights ? "隐藏全部边权" : "显示全部边权"; selected: canvas.showAllWeights; onClicked: canvas.showAllWeights = !canvas.showAllWeights }
         }
         Row {
             id: headerActions
@@ -287,7 +287,7 @@ ApplicationWindow {
             SoftButton {
                 id: networkButton
                 objectName: "networkButton"
-                text: "网络管理"; symbol: "◌"
+                text: "网络管理"; iconName: "disk"
                 compact: true
                 selected: networkPopup.visible
                 onClicked: networkPopup.visible ? networkPopup.close() : networkPopup.open()
