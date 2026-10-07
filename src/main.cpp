@@ -6,6 +6,8 @@
 #include <QQuickWindow>
 #include <QTimer>
 #include "GraphBackend.h"
+#include "SecureMessageService.h"
+#include "TransmissionSession.h"
 
 int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
@@ -14,8 +16,10 @@ int main(int argc, char *argv[]) {
     QGuiApplication::setWindowIcon(QIcon(QStringLiteral(":/assets/app-icon.png")));
     QQuickStyle::setStyle("Basic");
     GraphBackend backend;
+    SecureMessageService secureService;
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("graphBackend", &backend);
+    engine.rootContext()->setContextProperty("secureService", &secureService);
     engine.loadFromModule("CampusRouter", "Main");
     if (engine.rootObjects().isEmpty()) return -1;
     const int screenshotOption = app.arguments().indexOf("--screenshot");
@@ -80,6 +84,45 @@ int main(int argc, char *argv[]) {
                 window->setProperty("selectedNodeId", 4);
             } else if (state == QStringLiteral("property")) {
                 window->setProperty("propertyPanePinned", true);
+            } else if (state.startsWith(QStringLiteral("secure"))) {
+                backend.loadCostSample();
+                if (QObject *sinkBox = window->findChild<QObject *>(QStringLiteral("sinkBox")))
+                    sinkBox->setProperty("value", 8);
+                QMetaObject::invokeMethod(window, "toggleSecure");
+                if (state == QStringLiteral("secure-plain")) window->setProperty("secureScenario", "plaintext");
+                if (state == QStringLiteral("secure-tamper") || state == QStringLiteral("secure-flow-fail")) window->setProperty("secureScenario", "tamper");
+                if (QObject *message = window->findChild<QObject *>(QStringLiteral("secureMessageInput")))
+                    message->setProperty("text", QStringLiteral("今晚 20:00 开放实验室，通行口令 7391。"));
+                if (state != QStringLiteral("secure-input")) QMetaObject::invokeMethod(window, "sendSecure");
+                auto *channel = qobject_cast<TransmissionSession *>(secureService.channel());
+                if (state == QStringLiteral("secure-input")) {
+                    // Keep the editable first step visible for the preview.
+                } else if (state != QStringLiteral("secure-transit")) {
+                    channel->advance();
+                    if (state == QStringLiteral("secure-tamper") || state == QStringLiteral("secure-flow-fail")) channel->tamper();
+                    if (state != QStringLiteral("secure-intercept")) {
+                        channel->forward();
+                        while (channel->state().value("phase") == "transit") channel->advance();
+                        QMetaObject::invokeMethod(window, "decryptSecure");
+                    }
+                } else {
+                    window->setProperty("secureProgress", 0.5);
+                }
+                window->setProperty("secureRunning", false);
+                if (state.startsWith(QStringLiteral("secure-flow")) || state == QStringLiteral("secure-aes")) {
+                    if (QObject *panel = window->findChild<QObject *>(QStringLiteral("securePanel")))
+                        QMetaObject::invokeMethod(panel, "openFlow", Q_ARG(QVariant, state == QStringLiteral("secure-flow-fail") || state == QStringLiteral("secure-flow-raw") || state == QStringLiteral("secure-flow-hash") || state == QStringLiteral("secure-flow-counter") ? QStringLiteral("receiver") : QStringLiteral("sender")));
+                    if (state == QStringLiteral("secure-flow-raw") || state == QStringLiteral("secure-flow-hash") || state == QStringLiteral("secure-flow-counter"))
+                        if (QObject *flow = window->findChild<QObject *>(QStringLiteral("secureFlowView")))
+                            flow->setProperty("selectedStep", state == QStringLiteral("secure-flow-raw") ? "packet" : state == QStringLiteral("secure-flow-counter") ? "counter" : "hash");
+                    if (state == QStringLiteral("secure-aes"))
+                        if (QObject *flow = window->findChild<QObject *>(QStringLiteral("secureFlowView"))) {
+                            flow->setProperty("aesExpanded", true);
+                            flow->setProperty("aesStep", 2);
+                            flow->setProperty("selectedStep", "shift");
+                            flow->setProperty("selectedByte", 1);
+                        }
+                }
             }
         }
         const int widthOption = app.arguments().indexOf("--screenshot-width");
@@ -91,6 +134,13 @@ int main(int argc, char *argv[]) {
                     window->setWidth(width);
         }
         const QString output = app.arguments().at(screenshotOption + 1);
+        const int heightOption = app.arguments().indexOf("--screenshot-height");
+        if (heightOption >= 0 && heightOption + 1 < app.arguments().size()) {
+            bool ok = false;
+            const int height = app.arguments().at(heightOption + 1).toInt(&ok);
+            if (ok && height >= 560)
+                if (auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first())) window->setHeight(height);
+        }
         QTimer::singleShot(1200, &app, [&app, &engine, output]() {
             if (auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first()))
                 window->grabWindow().save(output);

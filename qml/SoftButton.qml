@@ -36,7 +36,7 @@ Button {
         }
         ToolbarGlyph {
             visible: control.iconName.length > 0
-            width: control.compact ? 18 : 20
+            width: control.compact ? 22 : 24
             height: width
             kind: control.iconName
             enabled: control.enabled

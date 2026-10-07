@@ -13,7 +13,7 @@ Button {
     implicitHeight: 36
     hoverEnabled: true
     focusPolicy: Qt.StrongFocus
-    ToolTip.visible: hovered || activeFocus
+    ToolTip.visible: hovered
     ToolTip.delay: 450
     ToolTip.text: hint
 
@@ -38,8 +38,7 @@ Button {
         ToolbarGlyph {
             visible: control.iconName.length > 0
             anchors.centerIn: parent
-            width: control.iconName === "pin" ? 19
-                   : control.iconName === "hand" || control.iconName === "cost" ? 20 : 22
+            width: 26
             height: width
             kind: control.iconName
             enabled: control.enabled

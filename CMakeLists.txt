@@ -11,9 +11,15 @@ qt_standard_project_setup()
 add_library(router_core STATIC
     src/GraphAlgorithms.cpp
     src/GraphBackend.cpp
+    src/SecureMessageService.cpp
+    src/TransmissionSession.cpp
+    src/AesGcmTrace.cpp
 )
 target_include_directories(router_core PUBLIC src)
 target_link_libraries(router_core PUBLIC Qt6::Core)
+if(WIN32)
+    target_link_libraries(router_core PUBLIC bcrypt)
+endif()
 
 set(app_sources src/main.cpp)
 if(WIN32)
@@ -26,11 +32,21 @@ set_target_properties(campus_router PROPERTIES WIN32_EXECUTABLE TRUE)
 qt_add_resources(campus_router "app_icons" PREFIX "/" FILES assets/app-icon.png)
 set(toolbar_icon_files
     assets/toolbar/hand.png
+    assets/toolbar/node.png
     assets/toolbar/link.png
+    assets/toolbar/property.png
     assets/toolbar/pin.png
+    assets/toolbar/layout.png
+    assets/toolbar/fit.png
     assets/toolbar/cost.png
     assets/toolbar/gauge.png
-    assets/toolbar/disk.png
+    assets/toolbar/weights.png
+    assets/toolbar/prim.png
+    assets/toolbar/kruskal.png
+    assets/toolbar/dijkstra.png
+    assets/toolbar/flow.png
+    assets/toolbar/secure.png
+    assets/toolbar/network.png
 )
 qt_add_resources(campus_router "toolbar_icons" PREFIX "/" FILES ${toolbar_icon_files})
 qt_add_qml_module(campus_router
@@ -39,6 +55,8 @@ qt_add_qml_module(campus_router
     QML_FILES
         qml/Main.qml
         qml/GraphCanvas.qml
+        qml/SecurePanel.qml
+        qml/CryptoWorkflow.qml
         qml/SoftButton.qml
         qml/SoftSpinBox.qml
         qml/SoftComboBox.qml
@@ -53,6 +71,12 @@ enable_testing()
 qt_add_executable(router_tests tests/tst_graph.cpp)
 target_link_libraries(router_tests PRIVATE router_core Qt6::Test)
 add_test(NAME router_tests COMMAND router_tests)
+
+if(WIN32)
+    qt_add_executable(secure_tests tests/tst_secure.cpp)
+    target_link_libraries(secure_tests PRIVATE router_core Qt6::Test)
+    add_test(NAME secure_tests COMMAND secure_tests)
+endif()
 
 qt_add_executable(canvas_tests tests/tst_canvas.cpp)
 target_link_libraries(canvas_tests PRIVATE Qt6::Quick Qt6::Test)

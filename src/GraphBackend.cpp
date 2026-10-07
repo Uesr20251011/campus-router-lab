@@ -3,7 +3,9 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonDocument>
+#include <QQueue>
 #include <QRandomGenerator>
 #include <QSaveFile>
 #include <QSet>
@@ -330,6 +332,40 @@ bool GraphBackend::hasNode(int id) const {
 bool GraphBackend::hasIncidentLink(int id) const {
     for (const auto &link : m_graph.links) if (link.u == id || link.v == id) return true;
     return false;
+}
+
+QVariantMap GraphBackend::route(int source, int sink) const {
+    if (!hasNode(source) || !hasNode(sink))
+        return {{"success", false}, {"error", QStringLiteral("请选择当前网络中的起点和终点")}};
+    if (source == sink)
+        return {{"success", false}, {"error", QStringLiteral("起点和终点不能相同")}};
+
+    QQueue<int> pending;
+    QSet<int> seen{source};
+    QHash<int, int> previousNode, previousLink;
+    pending.enqueue(source);
+    while (!pending.isEmpty() && !seen.contains(sink)) {
+        const int current = pending.dequeue();
+        for (const auto &link : m_graph.links) {
+            if (link.hasCapacity && link.capacity <= 0) continue;
+            int next = -1;
+            if (link.u == current) next = link.v;
+            else if (!link.directed && link.v == current) next = link.u;
+            if (next < 0 || seen.contains(next)) continue;
+            seen.insert(next);
+            previousNode.insert(next, current);
+            previousLink.insert(next, link.id);
+            pending.enqueue(next);
+        }
+    }
+    if (!seen.contains(sink))
+        return {{"success", false}, {"error", QStringLiteral("当前网络中起点无法到达终点")}};
+    QVector<int> nodes{sink}, edges;
+    for (int at = sink; at != source; at = previousNode.value(at)) {
+        edges.prepend(previousLink.value(at));
+        nodes.prepend(previousNode.value(at));
+    }
+    return {{"success", true}, {"pathNodes", integers(nodes)}, {"pathEdges", integers(edges)}};
 }
 
 QVariantMap GraphBackend::run(const QString &algorithm, int source, int sink) const {

@@ -1,4 +1,5 @@
 #include <QQuickItem>
+#include <QLineF>
 #include <QQuickView>
 #include <QtTest>
 
@@ -39,6 +40,37 @@ private:
     }
 
 private slots:
+    void securePacketTracksResizingWithoutChangingNodeCoordinates() {
+        QQuickView view;
+        prepare(view);
+        auto *root = view.rootObject();
+        root->setProperty("fixedNodes", true);
+        root->setProperty("algorithm", "secure");
+        root->setProperty("secureRoute", QVariantList{1, 2});
+        root->setProperty("secureState", QVariantMap{{"phase", "transit"}, {"hop", 0},
+                          {"packetId", 1}, {"encrypted", true}, {"wirePacket", "abcd"}});
+        root->setProperty("secureProgress", 0.5);
+        auto *packet = root->findChild<QQuickItem *>("secureMovingPacket");
+        QVERIFY(packet);
+        for (const QSize size : {QSize(976, 400), QSize(1200, 500)}) {
+            view.resize(size);
+            QTest::qWait(220);
+            const QPointF a = node(root, 1)->mapToItem(root, QPointF(31, 31));
+            const QPointF b = node(root, 2)->mapToItem(root, QPointF(31, 31));
+            const QPointF location = packet->property("location").toPointF();
+            QVERIFY(QLineF(location, (a + b) / 2).length() < 1.0);
+        }
+        QSignalSpy positions(root, SIGNAL(positionsSettled(QVariant)));
+        QVERIFY(positions.isValid());
+        QVERIFY(QMetaObject::invokeMethod(root, "savePositions"));
+        QCOMPARE(positions.size(), 1);
+        const QVariantList saved = positions.first().first().toList();
+        QCOMPARE(saved.size(), 2);
+        QCOMPARE(saved[0].toMap().value("x").toDouble(), 200.0);
+        QVERIFY(qAbs(saved[0].toMap().value("y").toDouble() - 200.0) < 0.001);
+        QCOMPARE(saved[1].toMap().value("x").toDouble(), 400.0);
+        QVERIFY(qAbs(saved[1].toMap().value("y").toDouble() - 200.0) < 0.001);
+    }
     void weightToggleControlsIdleLabels() {
         QQuickView view;
         prepare(view);

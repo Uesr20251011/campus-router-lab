@@ -1,4 +1,4 @@
-param([ValidatePattern('^[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*$')][string]$PackageName = 'CampusRouter-Windows')
+﻿param([ValidatePattern('^[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*$')][string]$PackageName = 'CampusRouter-Windows')
 $ErrorActionPreference = 'Stop'
 
 $qtBin = 'E:\Tools_E\QtOrginal\6.11.2\mingw_64\bin'
@@ -28,8 +28,10 @@ New-Item -ItemType Directory -Path $moduleQml -Force | Out-Null
 Copy-Item -LiteralPath "$virtualProject\build-ascii\campus_router.exe" -Destination (Join-Path $portable 'CampusRouter.exe') -Force
 
 $deployTool = Join-Path $qtBin 'windeployqt.exe'
-& $deployTool --release --compiler-runtime --no-translations --qmldir "$virtualProject\qml" --dir $portable (Join-Path $portable 'CampusRouter.exe') *> (Join-Path $dist 'package.log')
-if ($LASTEXITCODE -ne 0) { throw "Qt 部署失败，请查看 $dist\package.log。" }
+$deployLog = Join-Path $dist 'package.log'
+$deployErr = Join-Path $dist 'package.err'
+$deployProcess = Start-Process -FilePath $deployTool -ArgumentList @('--release', '--compiler-runtime', '--no-translations', '--qmldir', "$virtualProject\qml", '--dir', $portable, (Join-Path $portable 'CampusRouter.exe')) -WindowStyle Hidden -Wait -PassThru -RedirectStandardOutput $deployLog -RedirectStandardError $deployErr
+if ($deployProcess.ExitCode -ne 0) { throw "Qt deployment failed. See $deployLog and $deployErr." }
 
 Copy-Item -LiteralPath "$virtualProject\build-ascii\CampusRouter\qmldir" -Destination (Join-Path $module 'qmldir') -Force
 Get-ChildItem -LiteralPath "$virtualProject\build-ascii\CampusRouter\qml" -File |

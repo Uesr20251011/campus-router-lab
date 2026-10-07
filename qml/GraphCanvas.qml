@@ -7,6 +7,12 @@ Item {
     property var links: []
     property var step: ({})
     property string algorithm: ""
+    property var secureState: ({})
+    property var secureRoute: []
+    property int secureObserver: -1
+    property int secureSender: -1
+    property int secureReceiver: -1
+    property real secureProgress: 0
     property bool treeOnly: false
     property string metric: "cost"
     property string tool: "select"
@@ -36,8 +42,13 @@ Item {
     signal linkRequested(int fromId, int toId)
     signal nodeContextRequested(int id, real x, real y)
     signal positionsSettled(var positions)
+    signal packetInspectRequested()
 
-    readonly property real viewScale: Math.min((width - 36) / 940, (height - 36) / 610) * zoom
+    readonly property bool secureCompact: algorithm === "secure" && height < 130
+    readonly property real secureVerticalFactor: algorithm === "secure"
+        ? Math.max(0.15, Math.min(1, (height - 36) / (610 * Math.min(1, (width - 36) / 940)))) : 1
+    readonly property real viewScale: Math.min(algorithm === "secure" ? 1 : 100,
+        (width - 36) / 940, (height - 36) / (610 * secureVerticalFactor)) * zoom
 
     function nodeItem(id) {
         for (let i = 0; i < nodeRepeater.count; ++i) {
@@ -62,7 +73,10 @@ Item {
         for (let i = 0; i < links.length; ++i) if (links[i].id === id) return links[i]
         return null
     }
-    function linkVisible(link) { return !treeOnly || has(step.selectedEdges, link.id) }
+    function linkVisible(link) {
+        if (secureCompact) return pathHas(link)
+        return !treeOnly || has(step.selectedEdges, link.id)
+    }
     function forwardResidual(link) {
         if (algorithm !== "flow" || !step.residualArcs) return link.capacity
         let available = 0
@@ -76,6 +90,10 @@ Item {
     }
     function pathHas(link) {
         if (algorithm === "dijkstra") return has(step.pathEdges, link.id)
+        if (algorithm === "secure") {
+            if (step.pathEdges && step.pathEdges.length) return has(step.pathEdges, link.id)
+            return secureSegment(link) >= 0
+        }
         if (algorithm === "flow" && step.pathArcs) {
             for (const arc of step.pathArcs)
                 if (arc.linkId === link.id && !arc.reverse) return true
@@ -87,6 +105,22 @@ Item {
             if ((a === link.u && b === link.v) || (a === link.v && b === link.u)) return true
         }
         return false
+    }
+    function secureSegment(link) {
+        for (let i = 0; i < secureRoute.length - 1; ++i) {
+            if ((link.u === secureRoute[i] && link.v === secureRoute[i + 1]) ||
+                (!link.directed && link.v === secureRoute[i] && link.u === secureRoute[i + 1])) return i
+        }
+        return -1
+    }
+    function securePoint() {
+        if (!secureRoute.length) return Qt.point(-200, -200)
+        const hop = Math.min(secureRoute.length - 1, secureState.hop || 0)
+        const a = nodeCenter(secureRoute[hop])
+        const b = nodeCenter(secureRoute[Math.min(hop + 1, secureRoute.length - 1)])
+        const t = secureState.phase === "transit" ? secureProgress : 0
+        return Qt.point(graphLayer.x + (a.x + (b.x - a.x) * t) * root.viewScale,
+                        graphLayer.y + (a.y + (b.y - a.y) * t) * root.viewScale)
     }
     function activeRoute() {
         if (step.pathNodes && step.pathNodes.length > 1) return step.pathNodes
@@ -131,10 +165,11 @@ Item {
         dynamics.start()
     }
     function savePositions() {
+        if (secureCompact) return
         const points = []
         for (let i = 0; i < nodeRepeater.count; ++i) {
             const item = nodeRepeater.itemAt(i)
-            if (item) points.push({id: item.nodeId, x: item.x + 31, y: item.y + 31})
+            if (item) points.push({id: item.nodeId, x: item.x + 31, y: (item.y + 31) / secureVerticalFactor})
         }
         positionsSettled(points)
     }
@@ -153,6 +188,8 @@ Item {
     }
     onLayoutTickChanged: edgeCanvas.requestPaint()
     onStepChanged: { edgeCanvas.requestPaint(); if (root.playing) beadMotion.restart() }
+    onSecureStateChanged: edgeCanvas.requestPaint()
+    onSecureRouteChanged: edgeCanvas.requestPaint()
     onMetricChanged: edgeCanvas.requestPaint()
     onSelectedLinkChanged: edgeCanvas.requestPaint()
     onFlowPathFocusChanged: edgeCanvas.requestPaint()
@@ -211,7 +248,7 @@ Item {
 
     Item {
         id: graphLayer
-        width: 940; height: 610
+        width: 940; height: 610 * root.secureVerticalFactor
         x: (root.width - width * root.viewScale) / 2 + root.panX
         y: (root.height - height * root.viewScale) / 2 + root.panY
         scale: root.viewScale
@@ -312,7 +349,10 @@ Item {
                     const exhausted = flowMode && remaining <= 0
                     const exploringPath = root.step.kind === "search" ||
                                           (root.algorithm === "dijkstra" && root.step.kind === "consider")
-                    const tone = exhausted ? "#AEB8C8" : selected ? "#7A66D8" : onPath
+                    const secureSegment = root.algorithm === "secure" ? root.secureSegment(link) : -1
+                    const secureTone = secureSegment < (root.secureState.hop || 0) ? "#58B09C"
+                                     : secureSegment === (root.secureState.hop || 0) && root.secureState.phase === "transit" ? root.secureState.tampered ? "#CB7E79" : "#699DCE" : "#C0D4E8"
+                    const tone = root.algorithm === "secure" && onPath ? secureTone : exhausted ? "#AEB8C8" : selected ? "#7A66D8" : onPath
                         ? (exploringPath ? "#EAA668" : "#50BDA7")
                         : active ? "#F0B477" : rejected ? "#E693A4" : chosen ? "#68C1AC"
                         : hovered ? "#6D9FC8" : link.directed ? "#7D9FC9" : "#BDCADC"
@@ -357,7 +397,7 @@ Item {
                         ctx.globalAlpha = 1
                     }
                     const movingLargeGraph = root.draggedNode >= 0 && root.nodes.length > 60
-                    const showLabel = root.shouldShowWeightLabel({flowFinal, flow, movingLargeGraph,
+                    const showLabel = root.algorithm === "secure" ? (selected || hovered || root.showAllWeights) : root.shouldShowWeightLabel({flowFinal, flow, movingLargeGraph,
                                                                   selected, hovered, active, chosen,
                                                                   onPath, reverseRoute})
                     if (!showLabel) continue
@@ -452,6 +492,9 @@ Item {
             delegate: Item {
                 id: nodeBody
                 property int nodeId: modelData.id
+                visible: !root.secureCompact || root.secureRoute.indexOf(nodeId) >= 0
+                property string secureRole: root.algorithm !== "secure" ? "" : nodeId === root.secureSender ? "发送端" : nodeId === root.secureReceiver ? "接收端" : nodeId === root.secureObserver ? "观察节点" : ""
+                property color secureTone: nodeId === root.secureSender ? "#6997CB" : nodeId === root.secureReceiver ? "#58AE98" : "#D5A168"
                 property bool inPath: root.has(root.step.pathNodes, nodeId)
                 property bool visited: root.has(root.step.visitedNodes, nodeId)
                 property bool searchingFlow: root.algorithm === "flow" && root.step.kind === "search"
@@ -464,9 +507,10 @@ Item {
                     return !!activeLink && (activeLink.u === nodeId || activeLink.v === nodeId)
                 }
                 width: 62; height: 62
-                x: modelData.x - 31
-                y: modelData.y - 31
-                scale: inPath ? 1.14 : root.selectedNode === nodeId || root.linkStart === nodeId ? 1.1 : 1
+                x: root.secureCompact && root.secureRoute.indexOf(nodeId) >= 0
+                    ? 75 + root.secureRoute.indexOf(nodeId) * 790 / Math.max(1, root.secureRoute.length - 1) - 31 : modelData.x - 31
+                y: root.secureCompact ? graphLayer.height / 2 - 31 : modelData.y * root.secureVerticalFactor - 31
+                scale: root.algorithm === "secure" ? Math.max(1, 0.7 / root.viewScale) : inPath ? 1.14 : root.selectedNode === nodeId || root.linkStart === nodeId ? 1.1 : 1
                 z: root.draggedNode === nodeId ? 5 : 1
                 Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutBack } }
                 onXChanged: root.layoutTick++
@@ -475,16 +519,16 @@ Item {
                 Rectangle {
                     anchors.centerIn: parent
                     width: 75; height: 75; radius: 38
-                    color: nodeBody.inPath ? (nodeBody.searchingFlow || nodeBody.consideringPath ? "#29EAA668" : root.algorithm === "flow" || root.algorithm === "dijkstra" ? "#2950BDA7" : "#298D77E0")
+                    color: nodeBody.secureRole.length ? "#156A9CC8" : nodeBody.inPath ? (nodeBody.searchingFlow || nodeBody.consideringPath ? "#29EAA668" : root.algorithm === "flow" || root.algorithm === "dijkstra" || root.algorithm === "secure" ? "#2950BDA7" : "#298D77E0")
                                            : root.selectedNode === nodeBody.nodeId || nodeBody.edgeFocused ? "#267BCBB9" : "transparent"
                 }
                 Rectangle {
                     anchors.fill: parent
                     radius: 31
-                    color: nodeBody.inPath ? (nodeBody.searchingFlow || nodeBody.consideringPath ? "#FFF0DB" : root.algorithm === "flow" || root.algorithm === "dijkstra" ? "#D8F7ED" : "#E7DFFF")
+                    color: nodeBody.secureRole.length ? nodeBody.nodeId === root.secureSender ? "#E9F2FF" : nodeBody.nodeId === root.secureReceiver ? "#E7F8F0" : "#FFF2DF" : nodeBody.inPath ? (nodeBody.searchingFlow || nodeBody.consideringPath ? "#FFF0DB" : root.algorithm === "flow" || root.algorithm === "dijkstra" || root.algorithm === "secure" ? "#D8F7ED" : "#E7DFFF")
                                            : nodeBody.visited ? "#D8F5EB" : root.selectedNode === nodeBody.nodeId || nodeBody.edgeFocused ? "#DDF5ED" : "#FFFFFF"
-                    border.width: root.selectedNode === nodeBody.nodeId || nodeBody.inPath || nodeBody.edgeFocused ? 3 : 2
-                    border.color: nodeBody.inPath ? (nodeBody.searchingFlow || nodeBody.consideringPath ? "#EAA668" : root.algorithm === "flow" || root.algorithm === "dijkstra" ? "#50BDA7" : "#9B84E3")
+                    border.width: nodeBody.secureRole.length || root.selectedNode === nodeBody.nodeId || nodeBody.inPath || nodeBody.edgeFocused ? 3 : 2
+                    border.color: nodeBody.secureRole.length ? nodeBody.secureTone : nodeBody.inPath ? (nodeBody.searchingFlow || nodeBody.consideringPath ? "#EAA668" : root.algorithm === "flow" || root.algorithm === "dijkstra" || root.algorithm === "secure" ? "#50BDA7" : "#9B84E3")
                                                   : root.selectedNode === nodeBody.nodeId || nodeBody.edgeFocused ? "#66BDA7" : "#CFD9E8"
                     Behavior on color { ColorAnimation { duration: 200 } }
                 }
@@ -494,14 +538,21 @@ Item {
                     text: modelData.name
                     color: "#31445F"
                     font.family: "Microsoft YaHei UI"
-                    font.pixelSize: text.length > 5 ? 12 : 14
+                    font.pixelSize: root.algorithm === "secure" ? text.length > 5 ? 12 : 17 : text.length > 5 ? 12 : 14
                     font.weight: Font.DemiBold
                     horizontalAlignment: Text.AlignHCenter
                     elide: Text.ElideRight
                 }
                 Rectangle {
+                    visible: nodeBody.secureRole.length > 0
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    y: 62; width: 82; height: 24; radius: 8
+                    color: "#FFFFFF"; border.color: nodeBody.secureTone
+                    Text { anchors.centerIn: parent; text: nodeBody.secureRole; color: nodeBody.secureTone; font.pixelSize: 13; font.weight: Font.DemiBold }
+                }
+                Rectangle {
                     objectName: "distanceBadge"
-                    visible: root.algorithm === "dijkstra" && root.step.distances
+                    visible: root.algorithm === "dijkstra" && !!root.step.distances
                              && root.step.distances.length > index
                     x: 12; y: 60; width: 38; height: 20; radius: 9
                     color: nodeBody.visited ? "#E5F8F0" : nodeBody.tentativeDistance < 0 ? "#F2F5FA" : "#FFF2E2"
@@ -517,13 +568,13 @@ Item {
                     anchors.fill: parent
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     hoverEnabled: true
-                    cursorShape: root.tool === "select" ? Qt.OpenHandCursor : Qt.PointingHandCursor
+                    cursorShape: root.tool === "select" && !root.secureCompact ? Qt.OpenHandCursor : Qt.PointingHandCursor
                     onEntered: root.hoveredNode = nodeBody.nodeId
                     onExited: root.hoveredNode = -1
-                    drag.target: root.tool === "select" && pressedButtons === Qt.LeftButton ? nodeBody : null
+                    drag.target: root.tool === "select" && !root.secureCompact && pressedButtons === Qt.LeftButton ? nodeBody : null
                     drag.minimumX: 8; drag.maximumX: 870
                     drag.minimumY: 8; drag.maximumY: 540
-                    onPressed: {
+                    onPressed: mouse => {
                         if (mouse.button === Qt.LeftButton && root.tool === "select") {
                             root.nodeSelected(nodeBody.nodeId)
                         }
@@ -541,7 +592,7 @@ Item {
                         root.restPositions = positions
                         dynamics.start()
                     }
-                    onClicked: {
+                    onClicked: mouse => {
                         if (mouse.button === Qt.RightButton) {
                             const point = mapToItem(root, mouse.x, mouse.y)
                             root.nodeSelected(nodeBody.nodeId)
@@ -588,6 +639,35 @@ Item {
                 running: routeBead.visible
             }
         }
+    }
+
+    Rectangle {
+        id: securePacketBadge
+        objectName: "secureMovingPacket"
+        readonly property point location: root.securePoint()
+        visible: root.algorithm === "secure" && !!root.secureState.packetId
+        width: root.secureCompact ? 120 : 164; height: root.secureCompact ? 28 : 44; radius: 10
+        x: Math.max(4, Math.min(root.width - width - 4, location.y < 84 ? location.x + width + 54 < root.width ? location.x + 48 : location.x - width - 48 : location.x - width / 2))
+        y: Math.max(4, Math.min(root.height - height - 4, location.y - 76))
+        color: "#FFFFFF"
+        border.width: 2
+        border.color: root.secureState.tampered ? "#D08A82" : root.secureState.phase === "intercepted" ? "#DAA46C" : "#7FA5D0"
+        Column {
+            anchors.centerIn: parent; spacing: 2
+            Text {
+                text: "包 #" + String(root.secureState.packetId || 0).padStart(3, "0") + " · " + (root.secureState.tampered ? "已篡改" : root.secureState.encrypted ? "密文" : "明文")
+                font.pixelSize: 11; font.weight: Font.DemiBold; color: "#45627F"
+            }
+            Text { visible: !root.secureCompact; text: (root.secureState.wirePacket || "").slice(0, 16) + "…"; font.family: "Consolas"; font.pixelSize: 10; color: "#8A9BB0" }
+        }
+        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.packetInspectRequested() }
+    }
+
+    Text {
+        visible: root.algorithm === "secure"
+        anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter
+        text: root.secureRoute.length ? (root.secureCompact ? "路径视图：" : "路径：") + root.secureRoute.map(id => "R" + id).join(" → ") : "起点与终点之间暂无可用路径"
+        font.pixelSize: 11; color: "#869BB3"
     }
 
     Rectangle {

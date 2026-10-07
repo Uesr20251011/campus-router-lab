@@ -19,6 +19,7 @@ private slots:
     void randomNetworkStaysConnected();
     void primUsesChosenStartAndDijkstraAnimatesShortestRoute();
     void dijkstraRespectsDirectionAndReportsUnreachableTarget();
+    void secureRouteUsesCapacityOnlyLinksAndDirection();
 };
 
 void GraphTests::figure2HasMinimumCost41() {
@@ -95,6 +96,24 @@ void GraphTests::dijkstraRespectsDirectionAndReportsUnreachableTarget() {
     QVERIFY(!backward.value("success").toBool());
     QVERIFY(backward.value("error").toString().contains(QStringLiteral("无法到达")));
     QCOMPARE(backward.value("steps").toList().last().toMap().value("kind").toString(), QStringLiteral("error"));
+}
+
+void GraphTests::secureRouteUsesCapacityOnlyLinksAndDirection() {
+    GraphBackend backend;
+    backend.loadFlowSample();
+    const QVariantMap route = backend.route(1, 8);
+    QVERIFY(route.value("success").toBool());
+    const QVariantList nodes = route.value("pathNodes").toList();
+    const QVariantList edges = route.value("pathEdges").toList();
+    QCOMPARE(nodes.first().toInt(), 1);
+    QCOMPARE(nodes.last().toInt(), 8);
+    QCOMPARE(edges.size(), nodes.size() - 1);
+
+    backend.generateCampus(2);
+    QVERIFY(backend.removeLink(1));
+    QVERIFY(backend.addLink(1, 2, 3, 5, true) > 0);
+    QVERIFY(backend.route(1, 2).value("success").toBool());
+    QVERIFY(!backend.route(2, 1).value("success").toBool());
 }
 
 void GraphTests::disconnectedGraphCannotHaveSpanningTree() {

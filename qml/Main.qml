@@ -29,9 +29,38 @@ ApplicationWindow {
     property bool propertyPanePinned: false
     property bool inspectorOpen: false
     property string inspectorTab: "demo"
+    property bool secureMode: false
+    property string secureKey: ""
+    property string secureReceiverKey: ""
+    property string secureError: ""
+    property var securePathStep: ({})
+    property var secureTests: []
+    property var secureHistory: []
+    property string secureScenario: "encrypted"
+    property bool secureRunning: false
+    property real secureProgress: 0
+    property int secureVisualHop: 0
+    readonly property var secureChannel: typeof secureService !== "undefined" ? secureService.channel : null
+    readonly property var secureState: secureChannel ? secureChannel.state : ({phase: "idle", route: [], encrypted: true, observer: -1})
+    readonly property string securePacket: secureState.senderPacket || ""
+    readonly property string secureDecrypted: secureState.plaintext || ""
+    readonly property string secureOriginal: secureState.original || ""
+    readonly property int secureFrom: secureState.source || sourceBox.value
+    readonly property int secureTo: secureState.target || sinkBox.value
+    readonly property var securePreviewRoute: {
+        const nodes = graphBackend.nodes, links = graphBackend.links
+        return graphBackend.route(sourceBox.value, sinkBox.value).pathNodes || []
+    }
+    readonly property bool secureBusy: secureState.phase === "transit" || secureState.phase === "intercepted"
+    onSecureStateChanged: {
+        if ((secureState.hop || 0) !== secureVisualHop || secureState.phase !== "transit") {
+            secureProgress = 0
+            secureVisualHop = secureState.hop || 0
+        }
+    }
     readonly property bool hasSelection: selectedNodeId >= 0 || selectedLinkId >= 0
-    readonly property bool showingProperty: inspectorTab === "property" && hasSelection
-    readonly property bool showingDemo: inspectorTab === "demo" && activeAlgorithm.length > 0
+    readonly property bool showingProperty: !secureMode && inspectorTab === "property" && hasSelection
+    readonly property bool showingDemo: inspectorTab === "demo" && activeAlgorithm.length > 0 && !secureMode
     readonly property var currentStep: stepIndex >= 0 && stepIndex < traceSteps.length ? traceSteps[stepIndex] : ({})
     readonly property bool treeReady: (activeAlgorithm === "prim" || activeAlgorithm === "kruskal")
                                       && currentStep.kind === "finish"
@@ -43,6 +72,7 @@ ApplicationWindow {
     onHasSelectionChanged: updateInspector()
     onPropertyPanePinnedChanged: updateInspector()
     onActiveAlgorithmChanged: updateInspector()
+    onSecureModeChanged: updateInspector()
     onNoticeChanged: if (notice.length > 0) noticeTimer.restart()
     onStepIndexChanged: {
         if (treeOnly && stepIndex !== traceSteps.length - 1) treeOnly = false
@@ -58,6 +88,11 @@ ApplicationWindow {
         highlightedFlowPath = -1
     }
     function updateInspector() {
+        if (secureMode) {
+            inspectorOpen = false
+            inspectorTab = "secure"
+            return
+        }
         if (propertyPanePinned) {
             inspectorOpen = true
             inspectorTab = hasSelection ? "property" : activeAlgorithm.length > 0 ? "demo" : "property"
@@ -76,15 +111,21 @@ ApplicationWindow {
     function chooseNode(id) {
         selectedNodeId = id
         selectedLinkId = -1
+        if (secureMode) {
+            if (id === secureFrom && secureState.senderPacket) securePanel.openFlow("sender")
+            else if (id === secureTo && secureState.receivedPacket) securePanel.openFlow("receiver")
+            else if (id === secureState.observer && secureState.capturedPacket) securePanel.openDetail("observer")
+            else if (!secureBusy) securePanel.observeNode(id)
+        }
         if (id >= 0) {
             nodeNameField.text = graphBackend.nodeName(id)
-            if (propertyPanePinned) inspectorTab = "property"
+            if (propertyPanePinned && !secureMode) inspectorTab = "property"
         } else if (activeAlgorithm.length > 0) inspectorTab = "demo"
     }
     function chooseLink(id) {
         selectedLinkId = id
         selectedNodeId = -1
-        if (id >= 0 && propertyPanePinned) inspectorTab = "property"
+        if (id >= 0 && propertyPanePinned && !secureMode) inspectorTab = "property"
         else if (activeAlgorithm.length > 0) inspectorTab = "demo"
         const link = selectedLinkData()
         if (link) {
@@ -100,6 +141,7 @@ ApplicationWindow {
     }
     function runAlgorithm(which) {
         if (activeAlgorithm === which) { exitDemo(); return }
+        if (secureMode) { secureMode = false; clearSecurePacket() }
         canvas.commitNow()
         treeOnly = false
         highlightedFlowPath = -1
@@ -113,6 +155,105 @@ ApplicationWindow {
         stepIndex = traceSteps.length ? 0 : -1
         playing = traceSteps.length > 1
         notice = result.success ? "" : result.error
+    }
+    function clearSecurePacket() {
+        secureRunning = false
+        secureProgress = 0
+        if (secureChannel) secureChannel.reset()
+        secureError = ""
+        securePathStep = ({})
+        secureTests = []
+    }
+    function generateSecureKey() {
+        const generated = secureService.generateKey()
+        if (!generated.success) { secureError = generated.error; return }
+        secureKey = generated.key
+        secureReceiverKey = generated.key
+    }
+    function toggleSecure() {
+        if (secureMode) {
+            secureMode = false
+            clearSecurePacket()
+            return
+        }
+        canvas.commitNow()
+        resetTrace()
+        secureMode = true
+        activeTool = "select"
+        sourceBox.commitInput()
+        sinkBox.commitInput()
+        if (!secureKey.length) generateSecureKey()
+    }
+    function secureRoute() {
+        sourceBox.commitInput()
+        sinkBox.commitInput()
+        const from = sourceBox.value, to = sinkBox.value
+        if (!graphBackend.hasNode(from) || !graphBackend.hasNode(to))
+            return ({success: false, error: "请选择当前网络中的起点和终点"})
+        if (from === to) return ({success: false, error: "起点和终点不能相同"})
+        return graphBackend.route(from, to)
+    }
+    function sendSecure() {
+        canvas.commitNow()
+        secureError = ""
+        const route = secureRoute()
+        if (!route.success) { secureError = route.error; return }
+        if (!secureChannel.start(securePanel.message, secureKey, secureScenario !== "plaintext",
+                                 route.pathNodes, securePanel.observer)) {
+            secureError = secureState.error || "发送失败"
+            return
+        }
+        securePathStep = ({kind: "finish", pathNodes: route.pathNodes, pathEdges: route.pathEdges})
+        secureProgress = 0
+        secureRunning = true
+    }
+    function advanceSecure() {
+        secureRunning = false
+        secureProgress = 0
+        secureChannel.advance()
+    }
+    function forwardSecure() {
+        secureProgress = 0
+        secureChannel.forward()
+        secureRunning = true
+    }
+    function tamperSecure() {
+        secureChannel.tamper()
+    }
+    function decryptSecure() {
+        const success = secureChannel.decrypt(secureReceiverKey)
+        secureError = ""
+        if (!success && secureState.phase !== "rejected") { secureError = secureState.error; return }
+        const row = {packetId: secureState.packetId, encrypted: secureState.encrypted,
+                     original: secureOriginal, packet: secureState.receivedPacket || "",
+                     plaintext: secureDecrypted, passed: success && secureState.matchesOriginal,
+                     detail: success ? "与发送快照一致" : secureState.error}
+        const history = secureHistory.filter(item => item.packetId !== row.packetId)
+        history.unshift(row)
+        secureHistory = history.slice(0, 12)
+    }
+    function runSecureTests() {
+        secureTests = []
+        const route = secureRoute()
+        if (!route.success) { secureError = route.error; return }
+        const messages = [securePanel.testMessage1, securePanel.testMessage2]
+        const results = []
+        for (let i = 0; i < messages.length; ++i) {
+            const sent = secureService.encrypt(messages[i], secureKey)
+            if (!sent.success) { secureError = sent.error; return }
+            const received = secureService.decrypt(sent.packet, secureReceiverKey)
+            results.push({name: "消息 " + (i + 1), passed: received.success && received.plaintext === messages[i],
+                          detail: messages[i], packet: sent.packet, plaintext: received.plaintext || ""})
+        }
+        const probe = secureService.encrypt("校验用消息", secureKey)
+        if (probe.success) {
+            const key = secureKey
+            const wrongKey = key.slice(0, -1) + (key.slice(-1).toLowerCase() === "0" ? "1" : "0")
+            results.push({name: "错误密钥", passed: !secureService.decrypt(probe.packet, wrongKey).success,
+                          detail: "接收端拒绝解密"})
+        }
+        secureTests = results
+        secureError = results.every(item => item.passed) ? "" : "有测试未通过"
     }
     function loadExample(which) {
         canvas.commitNow()
@@ -209,12 +350,23 @@ ApplicationWindow {
 
     Connections {
         target: graphBackend
-        function onTopologyChanged() { window.resetTrace() }
+        function onTopologyChanged() { window.resetTrace(); window.clearSecurePacket() }
     }
     Timer {
         id: noticeTimer
         interval: 4500
         onTriggered: window.notice = ""
+    }
+    Timer {
+        interval: 30; repeat: true
+        running: window.secureMode && window.secureRunning && window.secureState.phase === "transit"
+        onTriggered: {
+            window.secureProgress += 0.035
+            if (window.secureProgress >= 1) {
+                window.secureProgress = 0
+                window.secureChannel.advance()
+            }
+        }
     }
     Timer {
         interval: {
@@ -257,11 +409,11 @@ ApplicationWindow {
             spacing: 4
             Text { text: "编辑"; color: "#8292A7"; font.pixelSize: 11; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
             ToolIconButton { iconName: "hand"; hint: "选择与拖动 · Esc 返回此工具"; selected: window.activeTool === "select"; onClicked: window.activeTool = "select" }
-            ToolIconButton { symbol: "＋"; hint: "添加节点 · 点击画布连续添加"; selected: window.activeTool === "node"; onClicked: window.activeTool = "node" }
+            ToolIconButton { iconName: "node"; hint: "添加节点 · 点击画布连续添加"; selected: window.activeTool === "node"; onClicked: window.activeTool = "node" }
             ToolIconButton { iconName: "link"; hint: "连接节点 · 依次点击两个节点"; selected: window.activeTool === "link"; onClicked: window.activeTool = "link" }
             Rectangle { width: 1; height: 25; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
             Text { text: "属性"; color: "#8292A7"; font.pixelSize: 11; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
-            ToolIconButton { objectName: "propertyPanelTool"; symbol: "✎"; hint: window.propertyPanePinned ? "结束属性编辑" : "编辑属性 · 展开右侧属性栏并保持"; selected: window.propertyPanePinned; onClicked: window.propertyPanePinned = !window.propertyPanePinned }
+            ToolIconButton { objectName: "propertyPanelTool"; iconName: "property"; hint: window.propertyPanePinned ? "结束属性编辑" : "编辑属性 · 展开右侧属性栏并保持"; selected: window.propertyPanePinned; onClicked: window.propertyPanePinned = !window.propertyPanePinned }
             Rectangle { width: 1; height: 25; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
             Row {
                 id: layoutTools
@@ -269,14 +421,14 @@ ApplicationWindow {
                 spacing: 4
                 Text { text: "布局"; color: "#8292A7"; font.pixelSize: 11; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
                 ToolIconButton { iconName: "pin"; hint: "固定节点模式 · 拖动只移动当前节点"; selected: window.fixedNodes; onClicked: window.fixedNodes = !window.fixedNodes }
-                ToolIconButton { symbol: "◎"; hint: "自动排布节点"; enabled: !window.fixedNodes; onClicked: { canvas.commitNow(); graphBackend.autoLayout(); canvas.fitView() } }
-                ToolIconButton { symbol: "⛶"; hint: "适应视图"; onClicked: canvas.fitView() }
+                ToolIconButton { iconName: "layout"; hint: "自动排布节点"; enabled: !window.fixedNodes; onClicked: { canvas.commitNow(); graphBackend.autoLayout(); canvas.fitView() } }
+                ToolIconButton { iconName: "fit"; hint: "适应视图"; onClicked: canvas.fitView() }
             }
             Rectangle { width: 1; height: 25; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
             Text { text: "视图"; color: "#8292A7"; font.pixelSize: 11; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
             ToolIconButton { iconName: "cost"; hint: "显示建设造价"; selected: window.metric === "cost"; onClicked: window.metric = "cost" }
             ToolIconButton { iconName: "gauge"; hint: "显示传输容量"; selected: window.metric === "capacity"; onClicked: window.metric = "capacity" }
-            ToolIconButton { symbol: "All"; symbolSize: 13; hint: canvas.showAllWeights ? "隐藏全部边权" : "显示全部边权"; selected: canvas.showAllWeights; onClicked: canvas.showAllWeights = !canvas.showAllWeights }
+            ToolIconButton { iconName: "weights"; hint: canvas.showAllWeights ? "隐藏全部边权" : "显示全部边权"; selected: canvas.showAllWeights; onClicked: canvas.showAllWeights = !canvas.showAllWeights }
         }
         Row {
             id: headerActions
@@ -287,7 +439,7 @@ ApplicationWindow {
             SoftButton {
                 id: networkButton
                 objectName: "networkButton"
-                text: "网络管理"; iconName: "disk"
+                    text: "网络管理"; iconName: "network"
                 compact: true
                 selected: networkPopup.visible
                 onClicked: networkPopup.visible ? networkPopup.close() : networkPopup.open()
@@ -315,15 +467,16 @@ ApplicationWindow {
             anchors.top: parent.top; anchors.topMargin: 53
             spacing: 5
             Text { text: "算法"; color: "#8292A7"; font.pixelSize: 11; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
-            ToolIconButton { objectName: "primTool"; symbol: "✳"; hint: "Prim 最小生成树 · 再次点击退出演示"; selected: window.activeAlgorithm === "prim"; onClicked: window.runAlgorithm("prim") }
-            ToolIconButton { symbol: "◇"; hint: "Kruskal 最小生成树 · 再次点击退出演示"; selected: window.activeAlgorithm === "kruskal"; onClicked: window.runAlgorithm("kruskal") }
-            ToolIconButton { objectName: "dijkstraTool"; symbol: "⌁"; hint: "Dijkstra 最短路径 · 使用起点和终点"; selected: window.activeAlgorithm === "dijkstra"; accent: "#E5F1FF"; onClicked: window.runAlgorithm("dijkstra") }
-            ToolIconButton { symbol: "⇢"; hint: "最大流 · 再次点击退出演示"; selected: window.activeAlgorithm === "flow"; accent: "#E9E3FB"; onClicked: window.runAlgorithm("flow") }
+            ToolIconButton { objectName: "primTool"; iconName: "prim"; hint: "Prim 最小生成树 · 再次点击退出演示"; selected: window.activeAlgorithm === "prim"; onClicked: window.runAlgorithm("prim") }
+            ToolIconButton { iconName: "kruskal"; hint: "Kruskal 最小生成树 · 再次点击退出演示"; selected: window.activeAlgorithm === "kruskal"; onClicked: window.runAlgorithm("kruskal") }
+            ToolIconButton { objectName: "dijkstraTool"; iconName: "dijkstra"; hint: "Dijkstra 最短路径 · 使用起点和终点"; selected: window.activeAlgorithm === "dijkstra"; accent: "#E5F1FF"; onClicked: window.runAlgorithm("dijkstra") }
+            ToolIconButton { iconName: "flow"; hint: "最大流 · 再次点击退出演示"; selected: window.activeAlgorithm === "flow"; accent: "#E9E3FB"; onClicked: window.runAlgorithm("flow") }
+            ToolIconButton { objectName: "secureTool"; iconName: "secure"; hint: "安全通信 · 使用当前起点和终点"; selected: window.secureMode; accent: "#DDECF8"; onClicked: window.toggleSecure() }
             Rectangle { width: 1; height: 27; color: "#DDE6F0"; anchors.verticalCenter: parent.verticalCenter }
             Text { text: "起点"; color: "#8292A7"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
-            SoftSpinBox { id: sourceBox; objectName: "sourceBox"; width: 88; height: 36; from: 1; to: 200; value: 1; ToolTip.visible: hovered; ToolTip.text: "Prim、Dijkstra 和最大流的起点 · 可直接输入" }
+            SoftSpinBox { id: sourceBox; objectName: "sourceBox"; width: 88; height: 36; from: 1; to: 200; value: 1; ToolTip.visible: hovered; ToolTip.delay: 450; ToolTip.text: "算法和安全通信的起点 · 可直接输入"; onValueChanged: if (window.secureMode) window.clearSecurePacket() }
             Text { text: "终点"; color: "#8292A7"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
-            SoftSpinBox { id: sinkBox; objectName: "sinkBox"; width: 88; height: 36; from: 1; to: 200; value: 20; ToolTip.visible: hovered; ToolTip.text: "Dijkstra 和最大流的终点 · 可直接输入" }
+            SoftSpinBox { id: sinkBox; objectName: "sinkBox"; width: 88; height: 36; from: 1; to: 200; value: 20; ToolTip.visible: hovered; ToolTip.delay: 450; ToolTip.text: "算法和安全通信的终点 · 可直接输入"; onValueChanged: if (window.secureMode) window.clearSecurePacket() }
         }
         Text {
             anchors.right: parent.right; anchors.rightMargin: 24
@@ -435,7 +588,7 @@ ApplicationWindow {
             id: canvasCard
             objectName: "canvasCard"
             x: 16; y: 16
-            width: parent.width - 32 - (window.inspectorOpen ? rightPane.width + 12 : 0)
+            width: parent.width - 32 - (window.secureMode ? securePanel.panelWidth + 12 : window.inspectorOpen ? rightPane.width + 12 : 0)
             height: parent.height - 32
             color: "#FFFFFF"; radius: 22; border.color: "#E7ECF4"
             Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
@@ -443,19 +596,28 @@ ApplicationWindow {
                 id: canvas
                 objectName: "graphCanvas"
                 anchors.fill: parent; anchors.margins: 8
+                anchors.topMargin: 8
+                anchors.bottomMargin: 8
                 nodes: graphBackend.nodes
                 links: graphBackend.links
-                step: window.currentStep
-                algorithm: window.activeAlgorithm
+                step: window.secureMode ? window.securePathStep : window.currentStep
+                secureState: window.secureMode ? window.secureState : ({})
+                secureRoute: window.secureMode ? (window.secureState.route || []).length > 0 ? window.secureState.route : window.securePreviewRoute : []
+                secureObserver: window.secureMode ? window.secureState.phase === "idle" ? securePanel.observer : window.secureState.observer : -1
+                secureProgress: window.secureProgress
+                secureSender: sourceBox.value
+                secureReceiver: sinkBox.value
+                algorithm: window.secureMode ? "secure" : window.activeAlgorithm
                 treeOnly: window.treeOnly
                 metric: window.metric
                 tool: window.activeTool
-                fixedNodes: window.fixedNodes
+                fixedNodes: window.secureMode || window.fixedNodes
                 playing: window.playing
                 selectedNode: window.selectedNodeId
                 selectedLink: window.selectedLinkId
                 flowPathFocus: window.highlightedFlowPath
                 onNodeSelected: id => window.chooseNode(id)
+                onPacketInspectRequested: securePanel.openDetail(window.secureState.phase === "intercepted" ? "observer" : window.secureState.receivedPacket ? "receiver" : "sender")
                 onLinkSelected: id => window.chooseLink(id)
                 onNodeContextRequested: (id, x, y) => {
                     nodeMenu.nodeId = id
@@ -477,7 +639,7 @@ ApplicationWindow {
             Rectangle {
                 anchors.left: parent.left; anchors.bottom: parent.bottom
                 anchors.leftMargin: 20; anchors.bottomMargin: 20
-                width: legendRow.implicitWidth + 24; height: 36; radius: 12
+                    width: legendRow.implicitWidth + 24; height: 36; radius: 12
                 color: "#F5FFFFFF"; border.color: "#E7ECF5"
                 Row {
                     id: legendRow; anchors.centerIn: parent; spacing: 13
@@ -487,6 +649,8 @@ ApplicationWindow {
                             : window.activeAlgorithm === "flow"
                             ? [{name:"探索",tone:"#EAA668"}, {name:"通路",tone:"#50BDA7"},
                                {name:"逆向",tone:"#876BDB"}, {name:"余量0",tone:"#AEB8C8"}]
+                            : window.secureMode
+                            ? [{name:"密文路径",tone:"#50BDA7"}]
                             : window.activeAlgorithm === "dijkstra"
                             ? [{name:"已确定",tone:"#68C1AC"}, {name:"考察",tone:"#EAA668"},
                                {name:"当前路径",tone:"#50BDA7"}]
@@ -518,6 +682,15 @@ ApplicationWindow {
             }
         }
 
+        SecurePanel {
+            id: securePanel
+            host: window
+            visible: window.secureMode
+            anchors.fill: parent
+            source: sourceBox.value
+            target: sinkBox.value
+        }
+
         Rectangle {
             id: rightPane
             objectName: "rightPane"
@@ -538,12 +711,13 @@ ApplicationWindow {
                 width: parent.width
                 spacing: 11
                 Text {
-                    text: window.propertyPanePinned && window.inspectorTab === "property" ? "属性编辑" : window.showFlowResult ? "最大流结果"
+                    text: window.secureMode ? "安全通信" : window.propertyPanePinned && window.inspectorTab === "property" ? "属性编辑" : window.showFlowResult ? "最大流结果"
                           : window.shortestFinished ? "最短路径结果" : "算法演示"
                     color: "#344862"; font.pixelSize: 16; font.weight: Font.DemiBold
                 }
                 Text {
-                    text: window.propertyPanePinned && window.inspectorTab === "property"
+                    text: window.secureMode ? "R" + sourceBox.value + " → R" + sinkBox.value + " · AES-256-GCM"
+                          : window.propertyPanePinned && window.inspectorTab === "property"
                           ? (window.hasSelection ? "修改选中节点或链路" : "选择节点或链路修改属性") : window.showFlowResult
                           ? "总流量 " + window.currentStep.value + " 包/秒"
                           : window.shortestFinished ? "总造价 " + window.currentStep.value
@@ -551,7 +725,7 @@ ApplicationWindow {
                     color: window.showFlowResult || window.shortestFinished ? "#45A996" : "#94A2B5"; font.pixelSize: 12
                 }
                 RowLayout {
-                    visible: window.propertyPanePinned && window.hasSelection && window.activeAlgorithm.length > 0
+                    visible: window.propertyPanePinned && window.hasSelection && window.activeAlgorithm.length > 0 && !window.secureMode
                     Layout.fillWidth: true; spacing: 7
                     SoftButton { text: "属性"; compact: true; Layout.fillWidth: true; selected: window.inspectorTab === "property"; onClicked: window.inspectorTab = "property" }
                     SoftButton { text: "演示"; compact: true; Layout.fillWidth: true; selected: window.inspectorTab === "demo"; onClicked: window.inspectorTab = "demo" }
@@ -605,7 +779,7 @@ ApplicationWindow {
                     }
                 }
                 Rectangle {
-                    visible: !window.hasSelection && !window.showingDemo
+                    visible: !window.hasSelection && !window.showingDemo && !window.secureMode
                     Layout.fillWidth: true; height: 105; radius: 16; color: "#F6F8FD"
                     Column {
                         anchors.centerIn: parent; spacing: 7

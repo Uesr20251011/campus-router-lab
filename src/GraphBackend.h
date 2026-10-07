@@ -38,6 +38,7 @@ public:
     Q_INVOKABLE qint64 linkCapacity(int id) const;
     Q_INVOKABLE bool hasNode(int id) const;
     Q_INVOKABLE bool hasIncidentLink(int id) const;
+    Q_INVOKABLE QVariantMap route(int source, int sink) const;
     Q_INVOKABLE QVariantMap run(const QString &algorithm, int source = 1, int sink = 8) const;
 
 signals:
