@@ -26,6 +26,8 @@ QByteArray parseHex(const QString &text, int size) {
     return QByteArray::fromHex(encoded);
 }
 unsigned char multiply8(unsigned char a, unsigned char b) {
+    // GF(2^8) 乘法用于 AES 列混合：加法是异或，左移溢出时按
+    // x^8+x^4+x^3+x+1 约简（低 8 位常数 0x1b）。
     unsigned char result = 0;
     for (int i = 0; i < 8; ++i) {
         if (b & 1) result ^= a;
@@ -37,6 +39,8 @@ unsigned char multiply8(unsigned char a, unsigned char b) {
     return result;
 }
 const std::array<unsigned char, 256> &sbox() {
+    // S 盒由有限域乘法逆元（非零 a 的 a^254）和仿射变换构造，
+    // static table 只生成一次；0 的逆元按 AES 规则取 0。
     static const auto table = [] {
         std::array<unsigned char, 256> result{};
         for (int i = 0; i < 256; ++i) {
@@ -59,6 +63,8 @@ const std::array<unsigned char, 256> &sbox() {
     return table;
 }
 Keys expand(const QByteArray &key) {
+    // AES-256：32 字节主密钥扩展为 15 组 16 字节轮密钥（第 0~14 轮）。
+    // 每 32 字节进行 RotWord/SubWord/Rcon，半周期额外 SubWord，这是 256 位版特点。
     std::array<unsigned char, 240> words{};
     for (int i = 0; i < 32; ++i) words[i] = static_cast<unsigned char>(key[i]);
     unsigned char rcon = 1;
@@ -86,6 +92,9 @@ Block xorBlocks(Block left, const Block &right) {
     return left;
 }
 Block encrypt(Block state, const Keys &keys, QVariantList *operations = nullptr) {
+    // AES 状态按列存放：state[col*4+row]。先进行第 0 轮加轮密钥，
+    // 再执行 14 轮 SubBytes→ShiftRows→MixColumns→AddRoundKey。
+    // 最后一轮省略 MixColumns；operations 可选，用来逐工序保存输入/输出矩阵。
     auto record = [&](const Block &before, int round, const QString &kind) {
         if (!operations) return;
         QVariantMap row{{"round", round}, {"kind", kind}, {"input", hex(before)}, {"output", hex(state)}};
@@ -129,6 +138,8 @@ QVariantMap aesTrace(const Block &input, const Keys &keys) {
             {"operations", operations}, {"roundKeys", roundKeys}};
 }
 Block multiply128(const Block &x, const Block &h) {
+    // GHASH 在 GF(2^128) 中相乘，逐位累加并右移；移出的最低位为 1 时
+    // 用 0xe1 对应的约简多项式修正。它是认证计算，不是 AES 的列混合。
     Block z{}, v = h;
     for (int bit = 0; bit < 128; ++bit) {
         if (x[bit / 8] & (0x80 >> (bit % 8))) z = xorBlocks(z, v);
@@ -173,11 +184,14 @@ QVariantMap AesGcmTrace::packet(const QString &encoded, const QString &keyHex, i
     const int count = result.value("blockCount").toInt();
     if (selected < 0 || selected >= count) return failure(QStringLiteral("请选择有效的数据块"));
     Block j0 = block(nonce);
+    // 本实验 nonce 为 96 位：J0 = nonce || 00000001。
+    // H = AES_K(0^128)，tagMask = AES_K(J0)，消息首块用 nonce || 00000002。
     setCounter(j0, 1);
     const Block h = encrypt(Block{}, keys), mask = encrypt(j0, keys);
     Block accumulator{};
     QVariantList hashSteps;
     auto hashBlock = [&](const Block &input, const QString &kind, int index) {
+        // GHASH 递推：Y_i = (Y_(i-1) XOR X_i) * H。
         const Block before = accumulator;
         const Block combined = xorBlocks(accumulator, input);
         accumulator = multiply128(combined, h);
@@ -185,10 +199,13 @@ QVariantMap AesGcmTrace::packet(const QString &encoded, const QString &keyHex, i
                          {"before", hex(before)}, {"xor", hex(combined)}, {"output", hex(accumulator)}});
     };
     for (int i = 0; i < count; ++i) hashBlock(block(cipher.mid(i * 16, 16)), "cipher", i);
+    // 本实验 AAD 为空；长度块前 64 位为 0，后 64 位是密文比特数，大端编码。
+    // 不足 16 字节的密文尾块由 block() 右侧补零后参与 GHASH。
     Block lengths{};
     const std::uint64_t bits = std::uint64_t(cipher.size()) * 8;
     for (int i = 0; i < 8; ++i) lengths[15 - i] = static_cast<unsigned char>(bits >> (i * 8));
     hashBlock(lengths, "length", count);
+    // 认证标签 = GHASH XOR AES_K(J0)。累积差异后统一判断，避免提前退出比较。
     const Block computed = xorBlocks(accumulator, mask);
     unsigned char difference = 0;
     for (int i = 0; i < 16; ++i) difference |= computed[i] ^ static_cast<unsigned char>(tag[i]);
@@ -210,6 +227,8 @@ QVariantMap AesGcmTrace::packet(const QString &encoded, const QString &keyHex, i
     result["blockIndex"] = selected;
     result["counter"] = hex(selectedCounter);
     result["selectedCipher"] = hex(cipher.mid(selected * 16, 16));
+    // 先验标签、后释放明文。GCM 的恢复过程也使用正向 AES 生成计数器密钥流，
+    // 再与密文异或；所以结构图的接收端仍是正向 AES，而不是 InvSubBytes 等逆轮。
     if (accepted) {
         QByteArray clear = cipher;
         for (int i = 0; i < count; ++i) {

@@ -8,9 +8,13 @@
 
 ## Windows 双击版
 
-从 GitHub Releases 下载 `CampusRouter-v1.6.0-Windows.zip`，解压后双击其中的 `CampusRouter.exe`，无须安装 Qt 或打开 Qt Creator。程序静默启动，不会弹出控制台。Qt 运行库放在 exe 旁边，因此要保留整个解压文件夹。
+从 GitHub Releases 下载 `CampusRouter-v1.6.1-Windows.zip`，解压后双击其中的 `CampusRouter.exe`，无须安装 Qt 或打开 Qt Creator。程序静默启动，不会弹出控制台。Qt 运行库放在 exe 旁边，因此要保留整个解压文件夹。
 
 源码可在 Qt Creator 中打开 `CMakeLists.txt`，使用 Qt 6.11.2 MinGW 64-bit 套件构建。`package.ps1` 是 Windows 打包脚本；在其他电脑上使用前，需要把脚本开头的 Qt、MinGW 和 CMake 路径调整为本机安装位置。
+
+v1.6.1 包内附 `答辩资料/答辩导航.html`、详细代码说明和完整源码快照。Prim、Kruskal、Dijkstra、最大流分别位于 `src/algorithms` 中四份实际参与构建的独立文件，关键实现已有中文注释；AES/GCM、BFS 与受力排布也有定位说明。导航页可用普通浏览器打开，无需 Qt。
+
+包内的 `verify-portable.ps1` 可复查路径隔离启动与已加载模块来源，`免Qt运行验证说明.txt` 说明审计结果。验证在 Windows 11 64 位上清除开发环境路径后执行，并检查 Qt/插件从包内加载；没有冒充独立干净虚拟机实测。
 
 ## 使用
 

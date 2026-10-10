@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(CampusRouterLab VERSION 1.6.0 LANGUAGES CXX)
+project(CampusRouterLab VERSION 1.6.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,6 +10,10 @@ qt_standard_project_setup()
 
 add_library(router_core STATIC
     src/GraphAlgorithms.cpp
+    src/algorithms/Prim.cpp
+    src/algorithms/Kruskal.cpp
+    src/algorithms/Dijkstra.cpp
+    src/algorithms/MaxFlow.cpp
     src/GraphBackend.cpp
     src/SecureMessageService.cpp
     src/TransmissionSession.cpp

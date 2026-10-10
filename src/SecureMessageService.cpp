@@ -40,6 +40,8 @@ struct AesKey {
     }
 
     bool open(QByteArray &material) {
+        // 真实消息的加解密由 Windows 系统 CNG 提供：选择 AES 并设为 GCM。
+        // AesGcmTrace.cpp 则独立重算教学轨迹，二者结果由 tracePacket 交叉核对。
         if (!BCRYPT_SUCCESS(BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_AES_ALGORITHM, nullptr, 0)))
             return false;
         if (!BCRYPT_SUCCESS(BCryptSetProperty(algorithm, BCRYPT_CHAINING_MODE,
@@ -102,6 +104,8 @@ QVariantMap SecureMessageService::generateKey() const {
 }
 
 QVariantMap SecureMessageService::encrypt(const QString &plaintext, const QString &keyHex) const {
+    // UTF-8 明文 + 256 位密钥；每次发送生成新的 96 位随机 nonce。
+    // 发布包依赖 Windows 系统 bcrypt.dll，不需要额外安装 OpenSSL 加密库。
     QByteArray key = parseKey(keyHex);
     if (key.size() != keySize) return failure(QStringLiteral("密钥必须是 64 个十六进制字符（256 位）"));
     const QByteArray clear = plaintext.toUtf8();
@@ -124,6 +128,7 @@ QVariantMap SecureMessageService::encrypt(const QString &plaintext, const QStrin
         &written, 0);
     if (!BCRYPT_SUCCESS(status)) return failure(QStringLiteral("加密失败"));
     cipher.resize(int(written));
+    // 传输格式：12 字节 nonce | 16 字节 tag | 密文，再整体编码为 Base64。
     const QByteArray packet = nonce + tag + cipher;
     return {{"success", true}, {"packet", QString::fromLatin1(packet.toBase64())}};
 #else
@@ -152,6 +157,7 @@ QVariantMap SecureMessageService::decrypt(const QString &packetText, const QStri
     const NTSTATUS status = BCryptDecrypt(aes.handle,
         reinterpret_cast<PUCHAR>(cipher.data()), ULONG(cipher.size()), &info, nullptr, 0,
         reinterpret_cast<PUCHAR>(clear.data()), ULONG(clear.size()), &written, 0);
+    // CNG 同时完成解密和认证。失败时绝不把输出缓冲区作为明文返回给界面。
     if (!BCRYPT_SUCCESS(status)) return failure(QStringLiteral("解密失败：密钥错误或密文已被修改"));
     clear.resize(int(written));
     return {{"success", true}, {"plaintext", QString::fromUtf8(clear)}};

@@ -336,6 +336,8 @@ bool GraphBackend::hasIncidentLink(int id) const {
 }
 
 QVariantMap GraphBackend::route(int source, int sink) const {
+    // 安全通信选路用 BFS：寻找可用容量链路上“跳数最少”的可达路线，
+    // 与 Dijkstra 的“建设造价最小”以及最大流的“吞吐量最大”目标不同。
     if (!hasNode(source) || !hasNode(sink))
         return {{"success", false}, {"error", QStringLiteral("请选择当前网络中的起点和终点")}};
     if (source == sink)
@@ -348,11 +350,13 @@ QVariantMap GraphBackend::route(int source, int sink) const {
     while (!pending.isEmpty() && !seen.contains(sink)) {
         const int current = pending.dequeue();
         for (const auto &link : m_graph.links) {
+            // 已知容量为零的边不能发送；未设置容量的造价例题边仍视为可连通。
             if (link.hasCapacity && link.capacity <= 0) continue;
             int next = -1;
             if (link.u == current) next = link.v;
             else if (!link.directed && link.v == current) next = link.u;
             if (next < 0 || seen.contains(next)) continue;
+            // 入队时标记已访问，避免环路重复入队；保存节点与边前驱用于回溯。
             seen.insert(next);
             previousNode.insert(next, current);
             previousLink.insert(next, link.id);
@@ -370,6 +374,8 @@ QVariantMap GraphBackend::route(int source, int sink) const {
 }
 
 QVariantMap GraphBackend::run(const QString &algorithm, int source, int sink) const {
+    // QML 只请求算法名。实际计算在独立 C++ 文件中，随后把 Trace 转为 QVariant，
+    // 画布只播放这些结果，不在 JavaScript 中另算一套算法。
     Trace trace;
     if (algorithm == QStringLiteral("prim")) trace = runPrim(m_graph, source);
     else if (algorithm == QStringLiteral("kruskal")) trace = runKruskal(m_graph);

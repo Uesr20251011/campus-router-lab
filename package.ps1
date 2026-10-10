@@ -38,6 +38,11 @@ Get-ChildItem -LiteralPath "$virtualProject\build-ascii\CampusRouter\qml" -File 
     ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $moduleQml $_.Name) -Force }
 Copy-Item -LiteralPath (Join-Path $qtBin '..\plugins\platforms\qoffscreen.dll') -Destination (Join-Path $portable 'platforms\qoffscreen.dll') -Force
 
+# 将答辩资料与实际源码一起打包，避免发布后只有 exe 无法定位算法实现。
+Copy-Item -LiteralPath (Join-Path $project 'verify-portable.ps1') -Destination $portable -Force
+& (Join-Path $project 'export-defense.ps1') -Destination $portable
+Copy-Item -LiteralPath (Join-Path $project 'docs\defense\免Qt运行验证说明.txt') -Destination $portable -Force
+
 $archive = Join-Path $dist "$PackageName.zip"
 Compress-Archive -LiteralPath $portable -DestinationPath $archive -CompressionLevel Optimal -Force
 Write-Output "可双击运行：$portable\CampusRouter.exe"
