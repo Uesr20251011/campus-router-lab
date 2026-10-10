@@ -38,8 +38,6 @@ ApplicationWindow {
     property var secureHistory: []
     property string secureScenario: "encrypted"
     property bool secureRunning: false
-    property real secureProgress: 0
-    property int secureVisualHop: 0
     readonly property var secureChannel: typeof secureService !== "undefined" ? secureService.channel : null
     readonly property var secureState: secureChannel ? secureChannel.state : ({phase: "idle", route: [], encrypted: true, observer: -1})
     readonly property string securePacket: secureState.senderPacket || ""
@@ -52,12 +50,7 @@ ApplicationWindow {
         return graphBackend.route(sourceBox.value, sinkBox.value).pathNodes || []
     }
     readonly property bool secureBusy: secureState.phase === "transit" || secureState.phase === "intercepted"
-    onSecureStateChanged: {
-        if ((secureState.hop || 0) !== secureVisualHop || secureState.phase !== "transit") {
-            secureProgress = 0
-            secureVisualHop = secureState.hop || 0
-        }
-    }
+    onSecureReceiverKeyChanged: if (secureState.staticRoute) decryptSecure()
     readonly property bool hasSelection: selectedNodeId >= 0 || selectedLinkId >= 0
     readonly property bool showingProperty: !secureMode && inspectorTab === "property" && hasSelection
     readonly property bool showingDemo: inspectorTab === "demo" && activeAlgorithm.length > 0 && !secureMode
@@ -111,12 +104,7 @@ ApplicationWindow {
     function chooseNode(id) {
         selectedNodeId = id
         selectedLinkId = -1
-        if (secureMode) {
-            if (id === secureFrom && secureState.senderPacket) securePanel.openFlow("sender")
-            else if (id === secureTo && secureState.receivedPacket) securePanel.openFlow("receiver")
-            else if (id === secureState.observer && secureState.capturedPacket) securePanel.openDetail("observer")
-            else if (!secureBusy) securePanel.observeNode(id)
-        }
+        if (secureMode) securePanel.selectRouteNode(id)
         if (id >= 0) {
             nodeNameField.text = graphBackend.nodeName(id)
             if (propertyPanePinned && !secureMode) inspectorTab = "property"
@@ -131,7 +119,7 @@ ApplicationWindow {
         if (link) {
             costField.text = link.hasCost ? String(link.cost) : "0"
             capacityField.text = link.hasCapacity ? String(link.capacity) : "0"
-            directionSwitch.checked = link.directed
+            linkDirectionBox.currentIndex = link.directed ? 1 : 0
         }
     }
     function selectedLinkData() {
@@ -158,7 +146,6 @@ ApplicationWindow {
     }
     function clearSecurePacket() {
         secureRunning = false
-        secureProgress = 0
         if (secureChannel) secureChannel.reset()
         secureError = ""
         securePathStep = ({})
@@ -204,30 +191,23 @@ ApplicationWindow {
             return
         }
         securePathStep = ({kind: "finish", pathNodes: route.pathNodes, pathEdges: route.pathEdges})
-        secureProgress = 0
-        secureRunning = true
-    }
-    function advanceSecure() {
         secureRunning = false
-        secureProgress = 0
-        secureChannel.advance()
-    }
-    function forwardSecure() {
-        secureProgress = 0
-        secureChannel.forward()
-        secureRunning = true
-    }
-    function tamperSecure() {
-        secureChannel.tamper()
+        secureChannel.completeRoute(secureReceiverKey)
+        securePanel.selectRouteNode(secureFrom)
+        updateSecureHistory()
     }
     function decryptSecure() {
         const success = secureChannel.decrypt(secureReceiverKey)
         secureError = ""
         if (!success && secureState.phase !== "rejected") { secureError = secureState.error; return }
+        updateSecureHistory()
+    }
+    function updateSecureHistory() {
+        const success = secureState.phase === "decrypted"
         const row = {packetId: secureState.packetId, encrypted: secureState.encrypted,
                      original: secureOriginal, packet: secureState.receivedPacket || "",
                      plaintext: secureDecrypted, passed: success && secureState.matchesOriginal,
-                     detail: success ? "与发送快照一致" : secureState.error}
+                     detail: success ? secureState.matchesOriginal ? "与发送快照一致" : "接收消息与发送快照不同" : secureState.error}
         const history = secureHistory.filter(item => item.packetId !== row.packetId)
         history.unshift(row)
         secureHistory = history.slice(0, 12)
@@ -331,8 +311,12 @@ ApplicationWindow {
             return
         }
         canvas.commitNow()
-        if (graphBackend.updateLink(selectedLinkId, cost, capacity, directionSwitch.checked)) notice = "链路参数已更新"
-        else notice = graphBackend.error
+        if (graphBackend.updateLink(selectedLinkId, cost, capacity,
+                                    linkDirectionBox.currentIndex !== 0,
+                                    linkDirectionBox.currentIndex === 2)) {
+            chooseLink(selectedLinkId)
+            notice = "链路参数已更新"
+        } else notice = graphBackend.error
     }
     function removeSelection() {
         canvas.commitNow()
@@ -356,17 +340,6 @@ ApplicationWindow {
         id: noticeTimer
         interval: 4500
         onTriggered: window.notice = ""
-    }
-    Timer {
-        interval: 30; repeat: true
-        running: window.secureMode && window.secureRunning && window.secureState.phase === "transit"
-        onTriggered: {
-            window.secureProgress += 0.035
-            if (window.secureProgress >= 1) {
-                window.secureProgress = 0
-                window.secureChannel.advance()
-            }
-        }
     }
     Timer {
         interval: {
@@ -603,8 +576,6 @@ ApplicationWindow {
                 step: window.secureMode ? window.securePathStep : window.currentStep
                 secureState: window.secureMode ? window.secureState : ({})
                 secureRoute: window.secureMode ? (window.secureState.route || []).length > 0 ? window.secureState.route : window.securePreviewRoute : []
-                secureObserver: window.secureMode ? window.secureState.phase === "idle" ? securePanel.observer : window.secureState.observer : -1
-                secureProgress: window.secureProgress
                 secureSender: sourceBox.value
                 secureReceiver: sinkBox.value
                 algorithm: window.secureMode ? "secure" : window.activeAlgorithm
@@ -617,7 +588,6 @@ ApplicationWindow {
                 selectedLink: window.selectedLinkId
                 flowPathFocus: window.highlightedFlowPath
                 onNodeSelected: id => window.chooseNode(id)
-                onPacketInspectRequested: securePanel.openDetail(window.secureState.phase === "intercepted" ? "observer" : window.secureState.receivedPacket ? "receiver" : "sender")
                 onLinkSelected: id => window.chooseLink(id)
                 onNodeContextRequested: (id, x, y) => {
                     nodeMenu.nodeId = id
@@ -634,33 +604,6 @@ ApplicationWindow {
                     const id = graphBackend.addLink(fromId, toId, 10, 15, false)
                     if (id >= 0) window.chooseLink(id)
                     else window.notice = graphBackend.error
-                }
-            }
-            Rectangle {
-                anchors.left: parent.left; anchors.bottom: parent.bottom
-                anchors.leftMargin: 20; anchors.bottomMargin: 20
-                    width: legendRow.implicitWidth + 24; height: 36; radius: 12
-                color: "#F5FFFFFF"; border.color: "#E7ECF5"
-                Row {
-                    id: legendRow; anchors.centerIn: parent; spacing: 13
-                    Repeater {
-                        model: window.flowFinished
-                            ? [{name:"彩色路径",tone:"#36AA99"}, {name:"未载流",tone:"#AEB8C8"}]
-                            : window.activeAlgorithm === "flow"
-                            ? [{name:"探索",tone:"#EAA668"}, {name:"通路",tone:"#50BDA7"},
-                               {name:"逆向",tone:"#876BDB"}, {name:"余量0",tone:"#AEB8C8"}]
-                            : window.secureMode
-                            ? [{name:"密文路径",tone:"#50BDA7"}]
-                            : window.activeAlgorithm === "dijkstra"
-                            ? [{name:"已确定",tone:"#68C1AC"}, {name:"考察",tone:"#EAA668"},
-                               {name:"当前路径",tone:"#50BDA7"}]
-                            : [{name:"已选",tone:"#68C1AC"}, {name:"当前",tone:"#F0B477"}]
-                        delegate: Row {
-                            spacing: 5
-                            Rectangle { width: 10; height: 10; radius: 5; color: modelData.tone; anchors.verticalCenter: parent.verticalCenter }
-                            Text { text: modelData.name; color: "#8292AA"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
-                        }
-                    }
                 }
             }
             Rectangle {
@@ -761,20 +704,22 @@ ApplicationWindow {
                     SoftTextField { id: costField; Layout.fillWidth: true; placeholderText: "例如 10"; validator: IntValidator { bottom: 0 } }
                     Text { text: "最大传输容量（包/秒）"; color: "#8191A8"; font.pixelSize: 11 }
                     SoftTextField { id: capacityField; Layout.fillWidth: true; placeholderText: "例如 15"; validator: IntValidator { bottom: 0 } }
-                    RowLayout {
+                    Text { text: "链路方向"; color: "#8191A8"; font.pixelSize: 11 }
+                    SoftComboBox {
+                        id: linkDirectionBox
+                        objectName: "linkDirectionBox"
                         Layout.fillWidth: true
-                        Text {
-                            text: {
-                                const link = window.selectedLinkData()
-                                return link ? "单向 R" + link.u + " → R" + link.v : "单向链路"
-                            }
-                            color: "#8191A8"; font.pixelSize: 12; Layout.fillWidth: true
+                        model: {
+                            const link = window.selectedLinkData()
+                            if (!link) return []
+                            return ["无向 · R" + link.u + " — R" + link.v,
+                                    "单向 · R" + link.u + " → R" + link.v,
+                                    "单向 · R" + link.v + " → R" + link.u]
                         }
-                        Switch { id: directionSwitch }
                     }
                     RowLayout {
                         Layout.fillWidth: true
-                        SoftButton { text: "应用修改"; Layout.fillWidth: true; selected: true; onClicked: window.applyLink() }
+                        SoftButton { objectName: "applyLinkButton"; text: "应用修改"; Layout.fillWidth: true; selected: true; onClicked: window.applyLink() }
                         SoftButton { text: "删除"; accent: "#F4C9C9"; onClicked: window.removeSelection() }
                     }
                 }

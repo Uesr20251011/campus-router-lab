@@ -6,6 +6,7 @@
 #include <QQuickWindow>
 #include <QtTest>
 #include <functional>
+#include <QTemporaryDir>
 #include "GraphBackend.h"
 #include "SecureMessageService.h"
 
@@ -13,6 +14,61 @@ class LayoutTests : public QObject {
     Q_OBJECT
 
 private slots:
+    void edgeDirectionCanBeChangedAndSaved() {
+        QQuickStyle::setStyle("Basic");
+        QTemporaryDir directory;
+        const QString presetFile = directory.filePath("presets.json");
+        GraphBackend backend(nullptr, presetFile);
+        backend.generateCampus(2);
+        QQmlApplicationEngine engine;
+        engine.rootContext()->setContextProperty("graphBackend", &backend);
+        engine.load(QUrl::fromLocalFile(QString::fromUtf8(QML_MAIN_PATH)));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        QTRY_VERIFY(window->isExposed());
+        window->setProperty("propertyPanePinned", true);
+        QVERIFY(QMetaObject::invokeMethod(window, "chooseLink", Q_ARG(QVariant, 1)));
+        auto *direction = window->findChild<QQuickItem *>("linkDirectionBox");
+        auto *apply = window->findChild<QQuickItem *>("applyLinkButton");
+        QVERIFY2(direction && apply, "Edge inspector needs both endpoint directions");
+        QCOMPARE(direction->property("count").toInt(), 3);
+        QCOMPARE(direction->property("currentIndex").toInt(), 0);
+        direction->setProperty("currentIndex", 2);
+        QVERIFY(backend.moveNode(1, 200, 200));
+        QCOMPARE(direction->property("currentIndex").toInt(), 2);
+        auto applyDirection = [&](int index) {
+            direction->setProperty("currentIndex", index);
+            QTRY_VERIFY(apply->mapToScene(QPointF(apply->width()/2, apply->height()/2)).x() < window->width());
+            const QPoint center = apply->mapToScene(QPointF(apply->width()/2, apply->height()/2)).toPoint();
+            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, center);
+        };
+        applyDirection(2);
+        QVariantMap link = backend.links().first().toMap();
+        QCOMPARE(link.value("u").toInt(), 2);
+        QCOMPARE(link.value("v").toInt(), 1);
+        QVERIFY(link.value("directed").toBool());
+        QVERIFY(backend.route(2, 1).value("success").toBool());
+        QVERIFY(!backend.route(1, 2).value("success").toBool());
+        QVERIFY(backend.run("dijkstra", 2, 1).value("success").toBool());
+        QCOMPARE(backend.run("flow", 2, 1).value("value").toLongLong(), link.value("capacity").toLongLong());
+        QCOMPARE(backend.run("flow", 1, 2).value("value").toLongLong(), qint64(0));
+        // Reapplying the visible selection must not flip it back.
+        applyDirection(direction->property("currentIndex").toInt());
+        QCOMPARE(backend.links().first().toMap(), link);
+        QVERIFY(backend.savePreset(QStringLiteral("reversed")));
+        GraphBackend restored(nullptr, presetFile);
+        QVERIFY(restored.loadPreset(QStringLiteral("reversed")));
+        QCOMPARE(restored.links(), backend.links());
+        applyDirection(0);
+        QVERIFY(backend.route(1, 2).value("success").toBool());
+        QVERIFY(backend.route(2, 1).value("success").toBool());
+        applyDirection(2);
+        QCOMPARE(backend.links().first().toMap().value("u").toInt(), 1);
+        QCOMPARE(backend.links().first().toMap().value("v").toInt(), 2);
+        QVERIFY(backend.route(1, 2).value("success").toBool());
+        QVERIFY(!backend.route(2, 1).value("success").toBool());
+    }
     void secureMessageUsesSelectedEndpoints();
     void securePacketCanBeInspectedAndTamperedThroughTheControls();
     void algorithmDiagramExpandsRealAesStepsAndExplainsRejection();
@@ -86,7 +142,6 @@ private slots:
     }
 
     void inspectorAndToolbarKeepCanvasState() {
-        QQuickStyle::setStyle("Basic");
         GraphBackend backend;
         QQmlApplicationEngine engine;
         engine.rootContext()->setContextProperty("graphBackend", &backend);
@@ -209,69 +264,7 @@ private slots:
 };
 
 void LayoutTests::secureMessageUsesSelectedEndpoints() {
-#ifndef Q_OS_WIN
-    QSKIP("Secure message encryption uses Windows CNG in this build");
-#endif
-    GraphBackend backend;
-    SecureMessageService secure;
-    QQmlApplicationEngine engine;
-    engine.rootContext()->setContextProperty("graphBackend", &backend);
-    engine.rootContext()->setContextProperty("secureService", &secure);
-    engine.load(QUrl::fromLocalFile(QString::fromUtf8(QML_MAIN_PATH)));
-    QVERIFY2(!engine.rootObjects().isEmpty(), "Main.qml did not load");
-    auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
-    QVERIFY(window);
-    window->setWidth(880);
-    QTRY_VERIFY(window->isExposed());
-    auto *tool = window->findChild<QQuickItem *>("secureTool");
-    auto *source = window->findChild<QQuickItem *>("sourceBox");
-    auto *sink = window->findChild<QQuickItem *>("sinkBox");
-    auto *message = window->findChild<QQuickItem *>("secureMessageInput");
-    QVERIFY(tool && source && sink && message);
-    source->setProperty("value", 4);
-    sink->setProperty("value", 8);
-    const QPoint center = tool->mapToScene(QPointF(tool->width() / 2, tool->height() / 2)).toPoint();
-    QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, center);
-    QTRY_VERIFY(window->property("secureMode").toBool());
-    QCOMPARE(window->property("inspectorTab").toString(), QStringLiteral("secure"));
-    QCOMPARE(window->property("secureKey").toString().size(), 64);
-    message->setProperty("text", QStringLiteral("从 R4 发送到 R8"));
-    QVERIFY(QMetaObject::invokeMethod(window, "sendSecure"));
-    QVERIFY(!window->property("securePacket").toString().isEmpty());
-    const QVariantList route = window->property("securePathStep").toMap().value("pathNodes").toList();
-    QCOMPARE(route.first().toInt(), 4);
-    QCOMPARE(route.last().toInt(), 8);
-    QVERIFY(QMetaObject::invokeMethod(window, "decryptSecure"));
-    QVERIFY(window->property("secureDecrypted").toString().isEmpty());
-    const QString packet = window->property("securePacket").toString();
-    message->setProperty("text", QStringLiteral("修改后的新消息"));
-    QCOMPARE(window->property("securePacket").toString(), packet);
-    for (int hop = 1; hop < route.size(); ++hop) {
-        QVERIFY(QMetaObject::invokeMethod(window, "advanceSecure"));
-        if (window->property("secureState").toMap().value("phase") == "intercepted")
-            QVERIFY(QMetaObject::invokeMethod(window, "forwardSecure"));
-    }
-    QVERIFY(QMetaObject::invokeMethod(window, "decryptSecure"));
-    QCOMPARE(window->property("secureDecrypted").toString(), QStringLiteral("从 R4 发送到 R8"));
-    // The new draft never replaces the already transmitted message.
-    message->setProperty("text", QStringLiteral("从 R4 发送到 R8"));
-    QVERIFY(QMetaObject::invokeMethod(window, "sendSecure"));
-    QVERIFY(!window->property("securePacket").toString().isEmpty());
-    sink->setProperty("value", 7);
-    QTRY_VERIFY(window->property("securePacket").toString().isEmpty());
-    backend.loadFlowSample();
-    source->setProperty("value", 1);
-    sink->setProperty("value", 8);
-    QVERIFY(QMetaObject::invokeMethod(window, "sendSecure"));
-    QVERIFY(!window->property("securePacket").toString().isEmpty());
-}
-
-void LayoutTests::securePacketCanBeInspectedAndTamperedThroughTheControls() {
-#ifndef Q_OS_WIN
-    QSKIP("Windows CNG required");
-#endif
-    GraphBackend backend;
-    backend.loadCostSample();
+    GraphBackend backend; backend.loadCostSample();
     SecureMessageService secure;
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("graphBackend", &backend);
@@ -279,112 +272,130 @@ void LayoutTests::securePacketCanBeInspectedAndTamperedThroughTheControls() {
     engine.load(QUrl::fromLocalFile(QString::fromUtf8(QML_MAIN_PATH)));
     QVERIFY(!engine.rootObjects().isEmpty());
     auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
-    window->setWidth(880);
-    window->setHeight(560);
+    window->findChild<QObject *>("sourceBox")->setProperty("value", 4);
     window->findChild<QObject *>("sinkBox")->setProperty("value", 8);
-    QVERIFY(QMetaObject::invokeMethod(window, "toggleSecure"));
+    QMetaObject::invokeMethod(window, "toggleSecure");
+    auto *message = window->findChild<QObject *>("secureMessageInput");
+    message->setProperty("text", QStringLiteral("从 R4 发送到 R8"));
+    QMetaObject::invokeMethod(window, "sendSecure");
+    const auto snapshot = window->property("secureState").toMap();
+    QCOMPARE(snapshot.value("source").toInt(), 4);
+    QCOMPARE(snapshot.value("target").toInt(), 8);
+    QCOMPARE(snapshot.value("plaintext").toString(), QStringLiteral("从 R4 发送到 R8"));
+    QVERIFY(!window->property("secureRunning").toBool());
+    const QString packet = snapshot.value("senderPacket").toString();
+    message->setProperty("text", "new draft");
+    QCOMPARE(window->property("securePacket").toString(), packet);
+    QMetaObject::invokeMethod(window, "toggleSecure");
+    QVERIFY(window->property("securePacket").toString().isEmpty());
+}
+
+void LayoutTests::securePacketCanBeInspectedAndTamperedThroughTheControls() {
+    GraphBackend backend; backend.loadCostSample();
+    SecureMessageService secure;
+    QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty("graphBackend", &backend);
+    engine.rootContext()->setContextProperty("secureService", &secure);
+    engine.load(QUrl::fromLocalFile(QString::fromUtf8(QML_MAIN_PATH)));
+    QVERIFY(!engine.rootObjects().isEmpty());
+    auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+    window->setWidth(1080); window->setHeight(680);
+    window->findChild<QObject *>("sinkBox")->setProperty("value", 8);
+    QMetaObject::invokeMethod(window, "toggleSecure");
     QTRY_VERIFY(window->isExposed());
-    QTest::qWait(300);
-    auto *networkCard = window->findChild<QQuickItem *>("canvasCard");
-    auto *networkCanvas = window->findChild<QQuickItem *>("graphCanvas");
-    QVERIFY(networkCard && networkCard->isVisible());
-    QVERIFY(networkCanvas && networkCanvas->isVisible());
-    QVERIFY(networkCard->width() > window->findChild<QQuickItem *>("secureFocusCard")->width());
+    std::function<QQuickItem *(QQuickItem *, const QString &)> findVisual;
+    findVisual = [&](QQuickItem *parent, const QString &name) -> QQuickItem * {
+        if (parent->objectName() == name) return parent;
+        for (auto *child : parent->childItems())
+            if (auto *found = findVisual(child, name)) return found;
+        return nullptr;
+    };
     auto click = [&](const char *name) {
-        // The current step replaces the visible controls; allow its layout to settle.
         QTest::qWait(80);
-        auto *button = window->findChild<QQuickItem *>(name);
-        if (!button || !button->isVisible() || !button->isEnabled()) return false;
+        auto *item = findVisual(window->contentItem(), QString::fromLatin1(name));
+        if (!item || !item->isVisible() || !item->isEnabled()) return false;
         QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
-                          button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+            item->mapToScene(QPointF(item->width()/2, item->height()/2)).toPoint());
         return true;
     };
-    const QString message = QStringLiteral("现场挑战 #8642 / 中文与符号 !?");
+    const QString message = QStringLiteral("多节点篡改体验 #4821");
     window->findChild<QObject *>("secureMessageInput")->setProperty("text", message);
     QVERIFY(click("secureSendButton"));
-    window->setProperty("secureRunning", false);
-    QCOMPARE(window->property("secureState").toMap().value("phase").toString(), QStringLiteral("transit"));
-    QVERIFY(!window->findChild<QQuickItem *>("secureDecryptButton")->isEnabled());
-    QVERIFY(click("secureMovingPacket"));
+    auto snapshot = window->property("secureState").toMap();
+    QCOMPARE(snapshot.value("phase").toString(), QStringLiteral("decrypted"));
+    const QString originalPacket = snapshot.value("senderPacket").toString();
+    auto *flowPopup = window->findChild<QObject *>("secureWorkflowPopup");
+    auto *panel = window->findChild<QObject *>("securePanel");
+    QVERIFY(!flowPopup->property("visible").toBool());
+    QVERIFY(click("securePacketPeekButton"));
     auto *detail = window->findChild<QObject *>("securePacketDetail");
-    QVERIFY(detail);
     QTRY_VERIFY(detail->property("visible").toBool());
     QMetaObject::invokeMethod(detail, "close");
-    QTest::qWait(200);
-    QVERIFY(click("secureStepButton"));
-    auto snapshot = window->property("secureState").toMap();
-    QCOMPARE(snapshot.value("phase").toString(), QStringLiteral("intercepted"));
-    const QString originalPacket = snapshot.value("senderPacket").toString();
-    QCOMPARE(snapshot.value("capturedPacket").toString(), originalPacket);
-    QVERIFY(!window->findChild<QQuickItem *>("secureMessageInput")->isVisible());
-    QVERIFY(!window->findChild<QQuickItem *>("secureDecryptButton")->isVisible());
-    QCOMPARE(window->findChild<QObject *>("secureStageData")->property("text").toString(),
-             originalPacket.left(128) + (originalPacket.size() > 128 ? QStringLiteral("…") : QString{}));
+    const QVariantList route = snapshot.value("route").toList();
+    QVERIFY(route.size() >= 4);
+    auto select = [&](int index) {
+        QMetaObject::invokeMethod(window, "chooseNode", Q_ARG(QVariant, route[index]));
+        QCOMPARE(panel->property("selectedRouteNode").toInt(), route[index].toInt());
+        QVERIFY(!flowPopup->property("visible").toBool());
+    };
+    select(1);
     QVERIFY(click("secureTamperButton"));
-    const QString changedPacket = window->property("secureState").toMap().value("wirePacket").toString();
-    QVERIFY(changedPacket != originalPacket);
-    QVERIFY(click("secureForwardButton"));
-    window->setProperty("secureRunning", false);
-    QVERIFY(click("secureStepButton"));
-    QVERIFY(click("secureStepButton"));
-    QCOMPARE(window->property("secureState").toMap().value("receivedPacket").toString(), changedPacket);
-    QVERIFY(click("secureDecryptButton"));
+    auto *attackPopup = window->findChild<QObject *>("secureAttackPopup");
+    QTRY_VERIFY(attackPopup->property("visible").toBool());
+    auto *editor = window->findChild<QObject *>("secureAttackInput");
+    QCOMPARE(editor->property("text").toString(), originalPacket);
+    QByteArray bytes = QByteArray::fromBase64(originalPacket.toLatin1());
+    bytes[28] = char(bytes[28] ^ 1);
+    const QString firstPacket = QString::fromLatin1(bytes.toBase64());
+    const QString oversized(65537, 'x');
+    editor->setProperty("text", oversized);
+    QVERIFY(click("secureApplyAttackButton"));
+    QVERIFY(attackPopup->property("visible").toBool());
+    QCOMPARE(editor->property("text").toString(), oversized);
+    editor->setProperty("text", firstPacket);
+    QVERIFY(click("secureApplyAttackButton"));
     QCOMPARE(window->property("secureState").toMap().value("phase").toString(), QStringLiteral("rejected"));
-    QVERIFY(window->property("secureDecrypted").toString().isEmpty());
-    for (const char *name : {"secureFocusCard"}) {
-        auto *card = window->findChild<QQuickItem *>(name);
-        QVERIFY(card);
-        const QPointF corner = card->mapToScene(QPointF(card->width(), card->height()));
-        QVERIFY(corner.x() <= 880);
-        QVERIFY(corner.y() <= 560);
-    }
-    QVERIFY(!window->findChild<QQuickItem *>("secureMessageInput")->isVisible());
-    QVERIFY(!window->findChild<QQuickItem *>("secureTamperButton")->isVisible());
-    QVERIFY(!window->findChild<QQuickItem *>("secureDecryptButton")->isVisible());
-    QVERIFY(click("secureRestartButton"));
-    QCOMPARE(window->property("secureState").toMap().value("phase").toString(), QStringLiteral("idle"));
-    QVERIFY(window->findChild<QQuickItem *>("secureMessageInput")->isVisible());
-    QVERIFY(!window->findChild<QQuickItem *>("secureStageData")->isVisible());
-    QCOMPARE(window->findChild<QObject *>("secureMessageInput")->property("text").toString(), message);
-    // Repeat with a new live message; a wrong key must fail before the same packet can recover.
-    const QString nextMessage = QStringLiteral("重新输入的消息 #1927");
-    window->findChild<QObject *>("secureMessageInput")->setProperty("text", nextMessage);
-    QVERIFY(click("secureSendButton"));
-    window->setProperty("secureRunning", false);
-    QVERIFY(click("secureStepButton"));
-    QVERIFY(click("secureForwardButton"));
-    window->setProperty("secureRunning", false);
-    QVERIFY(click("secureStepButton"));
-    QVERIFY(click("secureStepButton"));
-    const QString arrivedPacket = window->property("secureState").toMap().value("receivedPacket").toString();
-    const QString goodKey = window->property("secureKey").toString();
-    QString wrongKey = goodKey;
-    wrongKey[0] = goodKey[0] == QLatin1Char('0') ? QLatin1Char('1') : QLatin1Char('0');
-    window->setProperty("secureReceiverKey", wrongKey);
-    QVERIFY(click("secureDecryptButton"));
+    select(2);
+    QVERIFY(click("secureTamperButton"));
+    QCOMPARE(editor->property("text").toString(), firstPacket);
+    bytes[29] = char(bytes[29] ^ 2);
+    editor->setProperty("text", QString::fromLatin1(bytes.toBase64()));
+    QVERIFY(click("secureApplyAttackButton"));
+    QCOMPARE(window->property("secureState").toMap().value("receivedPacket").toString(), QString::fromLatin1(bytes.toBase64()));
+    select(1);
+    QVERIFY(click("secureRestoreNodeButton"));
+    select(2);
+    const auto downstream = window->property("secureState").toMap().value("nodeStates").toList()[2].toMap();
+    QCOMPARE(downstream.value("inputPacket").toString(), originalPacket);
+    QVERIFY(downstream.value("attacked").toBool());
+    QVERIFY(click("secureRestoreNodeButton"));
+    select(route.size()-1);
+    QCOMPARE(window->findChild<QObject *>("secureStageData")->property("text").toString(), message);
+    QVERIFY(!flowPopup->property("visible").toBool());
+    QVERIFY(click("secureFlowButton"));
+    QTRY_VERIFY(flowPopup->property("visible").toBool());
+    QCOMPARE(window->findChild<QObject *>("secureFlowView")->property("endpoint").toString(), QStringLiteral("receiver"));
+    QMetaObject::invokeMethod(flowPopup, "close");
+    const QString goodKey = window->property("secureReceiverKey").toString();
+    window->setProperty("secureReceiverKey", QString(64, 'f'));
+    QMetaObject::invokeMethod(window, "decryptSecure");
     QCOMPARE(window->property("secureState").toMap().value("phase").toString(), QStringLiteral("rejected"));
-    QVERIFY(window->property("secureDecrypted").toString().isEmpty());
     QVERIFY(click("secureChangeKeyButton"));
     window->setProperty("secureReceiverKey", goodKey);
-    QVERIFY(click("secureRetryButton"));
-    QCOMPARE(window->property("secureState").toMap().value("receivedPacket").toString(), arrivedPacket);
-    QCOMPARE(window->findChild<QObject *>("secureStageData")->property("text").toString(), nextMessage);
-    QVERIFY(!window->findChild<QQuickItem *>("secureDecryptButton")->isVisible());
-    // Independently decode the original captured packet, without reading the sender's draft.
-    auto *verification = window->findChild<QObject *>("secureVerificationPopup");
-    QVERIFY(verification);
-    window->findChild<QObject *>("secureVerificationPacket")->setProperty("text", originalPacket);
-    window->findChild<QObject *>("secureVerificationKey")->setProperty("text", window->property("secureKey"));
-    QMetaObject::invokeMethod(verification, "open");
-    QTest::qWait(200);
-    QVERIFY(click("secureVerificationRun"));
-    auto *result = window->findChild<QObject *>("secureVerificationResult");
-    QVERIFY(result);
-    QCOMPARE(result->property("text").toString(), message);
-    window->findChild<QObject *>("secureVerificationPacket")->setProperty("text", changedPacket);
-    QCOMPARE(result->property("text").toString(), QString{});
-    QVERIFY(click("secureVerificationRun"));
-    QVERIFY(result->property("text").toString().contains(QStringLiteral("解密失败")));
+    QCOMPARE(window->property("secureDecrypted").toString(), message);
+    QMetaObject::invokeMethod(window->findChild<QObject *>("secureKeyPopup"), "close");
+    QVERIFY(click("secureRestartButton"));
+    QCOMPARE(window->property("secureState").toMap().value("phase").toString(), QStringLiteral("idle"));
+    window->setProperty("secureScenario", "plaintext");
+    window->findChild<QObject *>("secureMessageInput")->setProperty("text", "hello");
+    QVERIFY(click("secureSendButton"));
+    select(1);
+    QVERIFY(click("secureTamperButton"));
+    editor->setProperty("text", "jello");
+    QVERIFY(click("secureApplyAttackButton"));
+    const auto history = window->property("secureHistory").toList().first().toMap();
+    QVERIFY(!history.value("passed").toBool());
+    QVERIFY(history.value("detail").toString().contains(QStringLiteral("不同")));
 }
 
 void LayoutTests::algorithmDiagramExpandsRealAesStepsAndExplainsRejection() {
@@ -428,9 +439,30 @@ void LayoutTests::algorithmDiagramExpandsRealAesStepsAndExplainsRejection() {
     const QVariantMap senderTrace = flow->property("trace").toMap();
     QCOMPARE(senderTrace.value("plaintext").toString(), message);
     QVERIFY(senderTrace.value("referenceMatches").toBool());
+    auto hasEdge = [&](const QString &from, const QString &to) {
+        for (const QVariant &edge : flow->property("edges").toList())
+            if (edge.toMap().value("from") == from && edge.toMap().value("to") == to) return true;
+        return false;
+    };
+    QVERIFY(hasEdge("key", "params"));
+    QVERIFY(hasEdge("counter", "params"));
+    QVERIFY(hasEdge("nonce", "packet"));
+    QVERIFY(!hasEdge("expand", "params"));
     QVERIFY(click("flowNode_aes"));
+    QVariant inputTone, outputTone, idleTone;
+    QMetaObject::invokeMethod(flow, "edgeTone", Q_RETURN_ARG(QVariant, inputTone), Q_ARG(QVariant, "counter"), Q_ARG(QVariant, "aes"));
+    QMetaObject::invokeMethod(flow, "edgeTone", Q_RETURN_ARG(QVariant, outputTone), Q_ARG(QVariant, "aes"), Q_ARG(QVariant, "xor"));
+    QMetaObject::invokeMethod(flow, "edgeTone", Q_RETURN_ARG(QVariant, idleTone), Q_ARG(QVariant, "hash"), Q_ARG(QVariant, "tag"));
+    QVERIFY(inputTone != outputTone && inputTone != idleTone && outputTone != idleTone);
     QVERIFY(click("flowExpandAesButton"));
     QTRY_VERIFY(flow->property("aesExpanded").toBool());
+    QVERIFY(hasEdge("previousKey", "roundInput"));
+    QVERIFY(hasEdge("expand", "roundKey"));
+    QVERIFY(hasEdge("roundInput", "sub"));
+    QVERIFY(click("flowAesInputSource"));
+    QCOMPARE(flow->property("selectedStep").toString(), QStringLiteral("roundInput"));
+    QVERIFY(flow->property("aesExpanded").toBool());
+    QVERIFY(click("flowNode_sub"));
     QVERIFY(click("flowNextButton"));
     QVERIFY(flow->property("aesStep").toInt() > 0);
     auto *output = window->findChild<QQuickItem *>("flowOutputMatrix");
@@ -452,16 +484,19 @@ void LayoutTests::algorithmDiagramExpandsRealAesStepsAndExplainsRejection() {
     QVERIFY(click("secureFlowButton"));
     QCOMPARE(flow->property("trace").toMap().value("plaintext").toString(), message);
     QMetaObject::invokeMethod(popup, "close");
-    QMetaObject::invokeMethod(window, "advanceSecure");
-    QMetaObject::invokeMethod(window, "tamperSecure");
-    QMetaObject::invokeMethod(window, "forwardSecure");
-    window->setProperty("secureRunning", false);
-    QMetaObject::invokeMethod(window, "advanceSecure");
-    QMetaObject::invokeMethod(window, "advanceSecure");
-    QMetaObject::invokeMethod(window, "decryptSecure");
+    const QVariantList route = window->property("secureState").toMap().value("route").toList();
+    QByteArray changed = QByteArray::fromBase64(window->property("securePacket").toString().toLatin1());
+    changed[28] = char(changed[28] ^ 1);
+    bool edited = false;
+    QVERIFY(QMetaObject::invokeMethod(secure.channel(), "editNode", Q_RETURN_ARG(bool, edited), Q_ARG(int, route[1].toInt()), Q_ARG(QString, QString::fromLatin1(changed.toBase64()))));
+    QVERIFY(edited);
+    QMetaObject::invokeMethod(window, "chooseNode", Q_ARG(QVariant, route.last()));
     QVERIFY(click("secureFlowButton"));
     const QVariantMap receiverTrace = flow->property("trace").toMap();
     QCOMPARE(flow->property("endpoint").toString(), QStringLiteral("receiver"));
+    QVERIFY(hasEdge("parse", "xor"));
+    QVERIFY(hasEdge("key", "params"));
+    QVERIFY(hasEdge("counter", "params"));
     QVERIFY(!receiverTrace.value("tagMatches").toBool());
     QVERIFY(receiverTrace.value("receivedTag") != receiverTrace.value("computedTag"));
     QVERIFY(receiverTrace.value("plaintext").toString().isEmpty());

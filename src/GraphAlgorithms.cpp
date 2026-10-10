@@ -58,13 +58,33 @@ Graph sampleCostGraph() {
 }
 
 Graph sampleFlowGraph() {
-    Graph graph = figureNodes();
-    const int data[][3] = {{1, 3, 7}, {1, 4, 4}, {1, 2, 5}, {2, 4, 2}, {2, 5, 8},
-                           {3, 7, 4}, {4, 7, 6}, {4, 5, 5}, {5, 6, 7}, {5, 8, 6},
-                           {7, 6, 4}, {6, 8, 7}, {7, 8, 5}};
-    int id = 1;
-    for (const auto &row : data)
-        graph.links.append({id++, row[0], row[1], 0, row[2], true, false, true});
+    // Corrected saved throughput example, including its original node positions.
+    Graph graph;
+    graph.nodes = {
+        {1, QStringLiteral("R1"), 251.0742585596222, 313.5831219520687},
+        {2, QStringLiteral("R2"), 355.85741032888177, 468.4225796112485},
+        {3, QStringLiteral("R3"), 337.3550200076425, 156.06336284819673},
+        {4, QStringLiteral("R4"), 419.33123582794536, 311.58155027447873},
+        {5, QStringLiteral("R5"), 545.9536772643086, 445.8295983403202},
+        {6, QStringLiteral("R6"), 585.3112177581326, 301.83459824733},
+        {7, QStringLiteral("R7"), 522.6885327938718, 167.56752247016072},
+        {8, QStringLiteral("R8"), 725.1578742181406, 296.33156557081224}
+    };
+    graph.links = {
+        {1, 1, 3, 0, 7, true, false, true},
+        {2, 1, 4, 0, 4, true, false, true},
+        {3, 1, 2, 0, 5, true, false, true},
+        {5, 2, 5, 0, 8, true, false, true},
+        {6, 3, 7, 0, 4, true, false, true},
+        {7, 4, 7, 0, 6, true, false, true},
+        {8, 4, 5, 0, 5, true, false, true},
+        {9, 5, 6, 0, 12, true, true, true},
+        {10, 5, 8, 0, 6, true, false, true},
+        {11, 7, 6, 0, 4, true, false, true},
+        {12, 6, 8, 0, 7, true, false, true},
+        {13, 7, 8, 0, 5, true, false, true},
+        {14, 4, 3, 0, 2, true, true, true}
+    };
     return graph;
 }
 

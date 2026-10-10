@@ -116,7 +116,7 @@ void GraphBackend::loadCostSample() {
     m_error.clear(); emit graphChanged(); emit topologyChanged(); emit errorChanged();
 }
 void GraphBackend::loadFlowSample() {
-    m_graph = forceDirectedLayout(sampleFlowGraph());
+    m_graph = sampleFlowGraph();
     m_error.clear(); emit graphChanged(); emit topologyChanged(); emit errorChanged();
 }
 void GraphBackend::generateCampus(int count) {
@@ -294,11 +294,12 @@ int GraphBackend::addLink(int u, int v, qint64 cost, qint64 capacity, bool direc
     m_error.clear(); emit graphChanged(); emit topologyChanged(); emit errorChanged(); return id;
 }
 
-bool GraphBackend::updateLink(int id, qint64 cost, qint64 capacity, bool directed) {
+bool GraphBackend::updateLink(int id, qint64 cost, qint64 capacity, bool directed, bool reverse) {
     if (cost < 0 || capacity < 0) {
         m_error = QStringLiteral("造价和容量不能为负数"); emit errorChanged(); return false;
     }
     for (auto &link : m_graph.links) if (link.id == id) {
+        if (reverse) std::swap(link.u, link.v);
         link.cost = cost; link.capacity = capacity; link.directed = directed;
         link.hasCost = true; link.hasCapacity = true;
         m_error.clear(); emit graphChanged(); emit topologyChanged(); emit errorChanged(); return true;

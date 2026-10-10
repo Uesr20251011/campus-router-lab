@@ -7,6 +7,7 @@ class SecureMessageService : public QObject {
     Q_OBJECT
     Q_PROPERTY(QObject *channel READ channel CONSTANT)
 public:
+    Q_INVOKABLE QString packetFromHex(QString hex) const { return QString::fromLatin1(QByteArray::fromHex(hex.toLatin1()).toBase64()); }
     explicit SecureMessageService(QObject *parent = nullptr);
     QObject *channel() const { return m_channel; }
 

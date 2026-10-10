@@ -1,0 +1,185 @@
+{
+  "links": [
+    {
+      "capacity": 7,
+      "cost": 0,
+      "directed": true,
+      "hasCapacity": true,
+      "hasCost": false,
+      "id": 1,
+      "u": 1,
+      "v": 3
+    },
+    {
+      "capacity": 4,
+      "cost": 0,
+      "directed": true,
+      "hasCapacity": true,
+      "hasCost": false,
+      "id": 2,
+      "u": 1,
+      "v": 4
+    },
+    {
+      "capacity": 5,
+      "cost": 0,
+      "directed": true,
+      "hasCapacity": true,
+      "hasCost": false,
+      "id": 3,
+      "u": 1,
+      "v": 2
+    },
+    {
+      "capacity": 8,
+      "cost": 0,
+      "directed": true,
+      "hasCapacity": true,
+      "hasCost": false,
+      "id": 5,
+      "u": 2,
+      "v": 5
+    },
+    {
+      "capacity": 4,
+      "cost": 0,
+      "directed": true,
+      "hasCapacity": true,
+      "hasCost": false,
+      "id": 6,
+      "u": 3,
+      "v": 7
+    },
+    {
+      "capacity": 6,
+      "cost": 0,
+      "directed": true,
+      "hasCapacity": true,
+      "hasCost": false,
+      "id": 7,
+      "u": 4,
+      "v": 7
+    },
+    {
+      "capacity": 5,
+      "cost": 0,
+      "directed": true,
+      "hasCapacity": true,
+      "hasCost": false,
+      "id": 8,
+      "u": 4,
+      "v": 5
+    },
+    {
+      "capacity": 12,
+      "cost": 0,
+      "directed": true,
+      "hasCapacity": true,
+      "hasCost": true,
+      "id": 9,
+      "u": 5,
+      "v": 6
+    },
+    {
+      "capacity": 6,
+      "cost": 0,
+      "directed": true,
+      "hasCapacity": true,
+      "hasCost": false,
+      "id": 10,
+      "u": 5,
+      "v": 8
+    },
+    {
+      "capacity": 4,
+      "cost": 0,
+      "directed": true,
+      "hasCapacity": true,
+      "hasCost": false,
+      "id": 11,
+      "u": 7,
+      "v": 6
+    },
+    {
+      "capacity": 7,
+      "cost": 0,
+      "directed": true,
+      "hasCapacity": true,
+      "hasCost": false,
+      "id": 12,
+      "u": 6,
+      "v": 8
+    },
+    {
+      "capacity": 5,
+      "cost": 0,
+      "directed": true,
+      "hasCapacity": true,
+      "hasCost": false,
+      "id": 13,
+      "u": 7,
+      "v": 8
+    },
+    {
+      "capacity": 2,
+      "cost": 0,
+      "directed": true,
+      "hasCapacity": true,
+      "hasCost": true,
+      "id": 14,
+      "u": 4,
+      "v": 3
+    }
+  ],
+  "name": "吞吐例题",
+  "nodes": [
+    {
+      "id": 1,
+      "name": "R1",
+      "x": 251.0742585596222,
+      "y": 313.5831219520687
+    },
+    {
+      "id": 2,
+      "name": "R2",
+      "x": 355.85741032888177,
+      "y": 468.4225796112485
+    },
+    {
+      "id": 3,
+      "name": "R3",
+      "x": 337.3550200076425,
+      "y": 156.06336284819673
+    },
+    {
+      "id": 4,
+      "name": "R4",
+      "x": 419.33123582794536,
+      "y": 311.58155027447873
+    },
+    {
+      "id": 5,
+      "name": "R5",
+      "x": 545.9536772643086,
+      "y": 445.8295983403202
+    },
+    {
+      "id": 6,
+      "name": "R6",
+      "x": 585.3112177581326,
+      "y": 301.83459824733
+    },
+    {
+      "id": 7,
+      "name": "R7",
+      "x": 522.6885327938718,
+      "y": 167.56752247016072
+    },
+    {
+      "id": 8,
+      "name": "R8",
+      "x": 725.1578742181406,
+      "y": 296.33156557081224
+    }
+  ]
+}

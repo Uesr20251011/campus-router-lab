@@ -31,7 +31,7 @@ public:
     Q_INVOKABLE bool removeNode(int id);
     Q_INVOKABLE int addNode(double x, double y);
     Q_INVOKABLE int addLink(int u, int v, qint64 cost, qint64 capacity, bool directed);
-    Q_INVOKABLE bool updateLink(int id, qint64 cost, qint64 capacity, bool directed);
+    Q_INVOKABLE bool updateLink(int id, qint64 cost, qint64 capacity, bool directed, bool reverse = false);
     Q_INVOKABLE bool removeLink(int id);
     Q_INVOKABLE QString nodeName(int id) const;
     Q_INVOKABLE qint64 linkCost(int id) const;

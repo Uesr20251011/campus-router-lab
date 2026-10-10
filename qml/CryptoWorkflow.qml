@@ -14,6 +14,7 @@ Item {
     property int hashIndex: 0
     property string focusedField: ""
     signal blockRequested(int index)
+    readonly property bool isRoundOperation: aesExpanded && ["sub", "shift", "mix", "key"].indexOf(selectedStep) >= 0
     readonly property var aes: trace.aes || ({operations: [], roundKeys: []})
     readonly property var operations: aes.operations || []
     readonly property var operation: operations[aesStep] || ({kind:"key",round:0,input:"",output:""})
@@ -54,22 +55,91 @@ Item {
     function roundNodes() {
         const round = operation.round
         const ids = round === 0 ? ["key"] : round === 14 ? ["sub","shift","key"] : ["sub","shift","mix","key"]
-        let rows = [{id:"roundInput",label:"本轮输入",note:"16 字节状态矩阵",x:.36,y:.02}]
+        let rows = [
+            {id:round === 0 ? "counter" : "previousKey",label:round === 0 ? "构造计数器" : "第 " + (round-1) + " 轮输出",note:round === 0 ? "来自总结构" : "上一轮加轮密钥",x:.02,y:.02},
+            {id:"roundInput",label:"本轮输入",note:"16 字节状态矩阵",x:.36,y:.02},
+            {id:"expand",label:"密钥扩展",note:"来自总结构",x:.70,y:.02}
+        ]
         for (let i = 0; i < ids.length; ++i)
-            rows.push({id:ids[i],label:operationName(ids[i]),note:operationEnglish(ids[i]),x:.36,y:.22 + i * .20})
-        rows.push({id:"roundKey",label:"轮密钥 K" + round,note:"来自密钥扩展",x:.70,y:.22 + (ids.length - 1) * .20})
+            rows.push({id:ids[i],label:operationName(ids[i]),note:operationEnglish(ids[i]),x:.36,y:.18 + i * .15})
+        rows.push({id:"roundKey",label:"轮密钥 K" + round,note:"来自密钥扩展",x:.70,y:.18 + (ids.length - 1) * .15})
+        rows.push({id:"roundOutput",label:"本轮输出",note:round === 14 ? "密钥流 → 异或工序" : "送入下一轮",x:.36,y:.83})
         return rows
+    }
+    readonly property var edges: connectionEdges()
+    function connectionEdges() {
+        let result = []
+        function add(from, to, points) { result.push({from:from,to:to,points:points}) }
+        if (aesExpanded) {
+            const ids = nodes.filter(n => ["sub","shift","mix","key"].indexOf(n.id) >= 0)
+            let previous = nodes.find(n => n.id === "roundInput")
+            add(operation.round === 0 ? "counter" : "previousKey", "roundInput", [[.30,.09],[.36,.09]])
+            const roundKey = nodes.find(n => n.id === "roundKey")
+            add("expand", "roundKey", [[.84,.16],[.84,roundKey.y]])
+            for (const node of ids) {
+                add(previous.id,node.id,[[.50,previous.y+.14],[.50,node.y]])
+                previous=node
+            }
+            add("roundKey","key",[[.70,previous.y+.07],[.64,previous.y+.07]])
+            add("key","roundOutput",[[.50,previous.y+.14],[.50,.83]])
+        } else if (endpoint === "sender") {
+            add("plain","bytes",[[.16,.16],[.16,.22]])
+            add("nonce","counter",[[.50,.16],[.50,.22]])
+            add("key","expand",[[.84,.16],[.84,.22]])
+            add("bytes","xor",[[.16,.36],[.16,.42]])
+            add("counter","aes",[[.50,.36],[.50,.42]])
+            add("expand","aes",[[.70,.29],[.67,.29],[.67,.49],[.64,.49]])
+            add("aes","xor",[[.36,.49],[.30,.49]])
+            add("xor","cipher",[[.16,.56],[.16,.62]])
+            add("cipher","hash",[[.30,.69],[.36,.69]])
+            add("key","params",[[.98,.09],[.995,.09],[.995,.49],[.98,.49]])
+            add("counter","params",[[.64,.29],[.655,.29],[.655,.39],[.84,.39],[.84,.42]])
+            add("params","hash",[[.70,.49],[.67,.49],[.67,.59],[.50,.59],[.50,.62]])
+            add("hash","tag",[[.64,.69],[.70,.69]])
+            add("params","tag",[[.84,.56],[.84,.62]])
+            add("cipher","packet",[[.16,.76],[.16,.89],[.36,.89]])
+            add("tag","packet",[[.84,.76],[.84,.89],[.64,.89]])
+            add("nonce","packet",[[.36,.09],[.325,.09],[.325,.80],[.50,.80],[.50,.82]])
+        } else {
+            add("packet","parse",[[.16,.16],[.16,.22]])
+            add("key","expand",[[.84,.16],[.84,.22]])
+            add("parse","counter",[[.30,.29],[.36,.29]])
+            add("counter","aes",[[.50,.36],[.50,.42]])
+            add("expand","aes",[[.70,.29],[.67,.29],[.67,.49],[.64,.49]])
+            add("key","params",[[.98,.09],[.995,.09],[.995,.49],[.98,.49]])
+            add("counter","params",[[.64,.29],[.655,.29],[.655,.39],[.84,.39],[.84,.42]])
+            add("parse","hash",[[.16,.36],[.16,.42]])
+            add("params","hash",[[.70,.49],[.67,.49],[.67,.39],[.32,.39],[.32,.49],[.30,.49]])
+            add("hash","tag",[[.16,.56],[.16,.62]])
+            add("params","tag",[[.84,.56],[.84,.59],[.32,.59],[.32,.69],[.30,.69]])
+            add("tag","verify",[[.30,.69],[.36,.69]])
+            add("parse","verify",[[.30,.29],[.32,.29],[.32,.57],[.50,.57],[.50,.62]])
+            add("parse","xor",[[.02,.29],[.005,.29],[.005,.79],[.99,.79],[.99,.69],[.98,.69]])
+            add("aes","xor",[[.64,.49],[.67,.49],[.67,.69],[.70,.69]])
+            add("verify","xor",[[.64,.69],[.70,.69]])
+            add("xor","output",[[.84,.76],[.84,.82]])
+        }
+        if (!aesExpanded && hashIndex > 0) {
+            add("hash","hash",endpoint === "sender" ? [[.50,.76],[.50,.79],[.665,.79],[.665,.73],[.64,.73]] : [[.16,.56],[.16,.58],[.005,.58],[.005,.49],[.02,.49]])
+        }
+        return result
+    }
+    function edgeTone(from, to) {
+        return to === selectedStep ? "#377FC4" : from === selectedStep ? "#D68B32" : "#A3B5CD"
     }
     function operationName(kind) { return ({sub:"字节替换",shift:"行移位",mix:"列混合",key:"加轮密钥"})[kind] || kind }
     function operationEnglish(kind) { return ({sub:"SubBytes",shift:"ShiftRows",mix:"MixColumns",key:"AddRoundKey"})[kind] || "" }
     function selectNode(id) {
         focusedField = ""
+        if (aesExpanded && ["counter", "expand"].indexOf(id) >= 0) { aesExpanded=false; selectedStep=id; return }
+        if (aesExpanded && id === "previousKey") { aesStep=operations.findIndex(op=>op.round===operation.round)-1; selectedStep="key"; return }
         if (aesExpanded && ["sub","shift","mix","key"].indexOf(id) >= 0) {
             const index = operations.findIndex(op => op.round === operation.round && op.kind === id)
             if (index >= 0) { aesStep = index; selectedStep = id }
         } else selectedStep = id
     }
     function followSource(row) {
+        if (row.roundNode) { selectedStep=row.roundNode; return }
         if (row.blockIndex !== undefined) blockRequested(row.blockIndex)
         if (row.aesIndex !== undefined) {
             if (row.aesIndex < 0) { aesExpanded=false; selectedStep="counter" }
@@ -91,13 +161,14 @@ Item {
         selectedStep = order[Math.max(0, Math.min(order.length - 1, index + delta))]
     }
     function title() {
-        if (aesExpanded) return "第 " + operation.round + " 轮 · " + (selectedStep === "roundKey" ? "轮密钥" : selectedStep === "roundInput" ? "本轮输入" : operationName(operation.kind))
+        if (aesExpanded) return "第 " + operation.round + " 轮 · " + (selectedStep === "roundKey" ? "轮密钥" : selectedStep === "roundInput" ? "本轮输入" : selectedStep === "roundOutput" ? "本轮输出" : operationName(operation.kind))
         const node = nodes.find(item => item.id === selectedStep)
         return node ? node.label : "选择一道工序"
     }
     function explanation() {
         if (aesExpanded) {
             if (selectedStep === "roundInput") return "做什么：取本轮开始时的 16 个字节，按列放进 4 × 4 矩阵：前 4 个字节是第一列，随后依次填入其他列。\n\n数据从哪来：初始轮接收本块计数器；第 1 至 14 轮接收上一轮的输出。后续四道工序会继续改变这个矩阵。"
+            if (selectedStep === "roundOutput") return "本轮最后一道加轮密钥的输出。第 0 至 13 轮将它交给下一轮，第 14 轮将它作为密钥流交给异或工序。"
             if (selectedStep === "roundKey") return "做什么：从密钥扩展结果中取出第 " + operation.round + " 轮使用的 16 字节密钥 K" + operation.round + "。\n\n为什么：原始密钥是 32 字节，而状态矩阵是 16 字节。扩展算法为各轮准备不同的 16 字节材料。\n\n接下来：这一份轮密钥与状态矩阵逐字节异或；它由通信密钥推导，不随包传输。"
             return ({sub:"做什么：把矩阵中的每个字节送入固定的 S-box 替换表，查出一个新字节。例如十六进制 ab 用 a 定位行、b 定位列。\n\n为什么：替换关系不是简单的线性运算，使输入和输出之间更难推算。字节位置保持不变，变化的是数值。\n\n怎么看：点击输出格，查看该格的查表输入与结果；输出矩阵接着交给行移位。",
                 shift:"做什么：把第 0、1、2、3 行分别循环左移 0、1、2、3 格。移出左边的字节会回到右边。\n\n为什么：字节的数值保持不变，但会换到其他列；下一步列混合就能让原来不同列的字节互相影响。\n\n怎么看：点击输出格，输入矩阵会标出它原来的位置。下方坐标按 [行,列] 表示，从 0 开始。",
@@ -126,7 +197,7 @@ Item {
         const cipherSource = endpoint==="sender" ? "cipher" : "parse"
         if (aesExpanded) {
             const first=operations.findIndex(op=>op.round===operation.round)
-            return selectedStep === "roundKey" ? [{name:"轮密钥 K" + operation.round,value:(aes.roundKeys || [])[operation.round] || "",origin:"来自「密钥扩展」· 第 " + operation.round + " 轮",sourceStep:"expand",sourceField:"expandedKeys"}]
+            return selectedStep === "roundOutput" ? [{name:"本轮输出",value:(operations.filter(op=>op.round===operation.round).slice(-1)[0] || {}).output || "",origin:"来自本轮最后一道加轮密钥",aesIndex:operations.findIndex(op=>op.round===operation.round && op.kind==="key")}] : selectedStep === "roundKey" ? [{name:"轮密钥 K" + operation.round,value:(aes.roundKeys || [])[operation.round] || "",origin:"来自「密钥扩展」· 第 " + operation.round + " 轮",sourceStep:"expand",sourceField:"expandedKeys"}]
                 : selectedStep === "roundInput" ? [{name:"本轮初始状态",value:(operations[first] || {}).input || "",origin:first===0?"来自「构造计数器」· 本块 AES 输入":"来自上一轮最后一道「加轮密钥」的输出",aesIndex:first-1}] : []
         }
         switch (selectedStep) {
@@ -198,52 +269,29 @@ Item {
                     Connections {
                         target: flow
                         function onNodesChanged() { arrows.requestPaint() }
+                        function onEdgesChanged() { arrows.requestPaint() }
                         function onSelectedStepChanged() { arrows.requestPaint() }
                     }
                     onPaint: {
                         const ctx = getContext("2d"); ctx.reset()
                         const w = width, h = height
-                        function path(points) {
-                            ctx.strokeStyle = "#A3B5CD"; ctx.lineWidth = 1.7; ctx.lineJoin = "round"
+                        function path(edge) {
+                            const points = edge.points
+                            ctx.strokeStyle = flow.edgeTone(edge.from,edge.to)
+                            ctx.lineWidth = edge.from === flow.selectedStep || edge.to === flow.selectedStep ? 3 : 1.7
+                            ctx.lineJoin = "round"
                             ctx.beginPath(); ctx.moveTo(points[0][0]*w, points[0][1]*h)
                             for (let i=1;i<points.length;i++) ctx.lineTo(points[i][0]*w,points[i][1]*h)
                             ctx.stroke()
                             const end=points[points.length-1], prev=points[points.length-2]
                             const angle=Math.atan2((end[1]-prev[1])*h,(end[0]-prev[0])*w)
                             ctx.fillStyle=ctx.strokeStyle;ctx.beginPath();ctx.moveTo(end[0]*w,end[1]*h)
-                            ctx.lineTo(end[0]*w-6*Math.cos(angle-.5),end[1]*h-6*Math.sin(angle-.5))
-                            ctx.lineTo(end[0]*w-6*Math.cos(angle+.5),end[1]*h-6*Math.sin(angle+.5));ctx.closePath();ctx.fill()
+                            ctx.lineTo(end[0]*w-7*Math.cos(angle-.5),end[1]*h-7*Math.sin(angle-.5))
+                            ctx.lineTo(end[0]*w-7*Math.cos(angle+.5),end[1]*h-7*Math.sin(angle+.5));ctx.closePath();ctx.fill()
                         }
-                        if (flow.aesExpanded) {
-                            const count=flow.operation.round===0?1:flow.operation.round===14?3:4
-                            for(let i=0;i<count;i++) path([[.50,.16+i*.20],[.50,.22+i*.20]])
-                            path([[.70,.29+(count-1)*.20],[.64,.29+(count-1)*.20]])
-                        } else if(flow.endpoint==="sender") {
-                            for(const x of [.16,.50,.84]) path([[x,.16],[x,.22]])
-                            for(const x of [.16,.50,.84]) path([[x,.36],[x,.42]])
-                            path([[.70,.29],[.67,.29],[.67,.49],[.64,.49]])
-                            path([[.36,.49],[.30,.49]])
-                            path([[.16,.56],[.16,.62]])
-                            path([[.30,.69],[.36,.69]])
-                            path([[.70,.49],[.67,.49],[.67,.59],[.50,.59],[.50,.62]])
-                            path([[.64,.69],[.70,.69]])
-                            path([[.84,.56],[.84,.62]])
-                            path([[.16,.76],[.16,.89],[.36,.89]])
-                            path([[.84,.76],[.84,.89],[.64,.89]])
-                        } else {
-                            path([[.16,.16],[.16,.22]]);path([[.84,.16],[.84,.22]])
-                            path([[.30,.29],[.36,.29]]);path([[.50,.36],[.50,.42]])
-                            path([[.70,.29],[.67,.29],[.67,.49],[.64,.49]])
-                            path([[.84,.36],[.84,.42]]);path([[.16,.36],[.16,.42]])
-                            path([[.70,.49],[.67,.49],[.67,.39],[.32,.39],[.32,.49],[.30,.49]])
-                            path([[.16,.56],[.16,.62]])
-                            path([[.84,.56],[.84,.59],[.32,.59],[.32,.69],[.30,.69]])
-                            path([[.30,.69],[.36,.69]])
-                            path([[.30,.29],[.32,.29],[.32,.57],[.50,.57],[.50,.62]])
-                            path([[.64,.49],[.67,.49],[.67,.69],[.70,.69]])
-                            path([[.64,.69],[.70,.69]])
-                            path([[.84,.76],[.84,.82]])
-                        }
+                        for (const edge of flow.edges.filter(e => e.from !== flow.selectedStep && e.to !== flow.selectedStep)) path(edge)
+                        for (const edge of flow.edges.filter(e => e.from === flow.selectedStep || e.to === flow.selectedStep)) path(edge)
+
                     }
                 }
                 Repeater {
@@ -268,7 +316,7 @@ Item {
                     }
                 }
             }
-            Text { Layout.fillWidth: true; text: aesExpanded ? "矩阵按列装入字节 · 点击方格查看计算 · 第 14 轮没有列混合" : "点击任一工序查看本次数据；AES 工位还可以展开轮运算。"; color:"#8B9CB1"; font.pixelSize:11; wrapMode: Text.Wrap }
+            Text { Layout.fillWidth: true; text: "蓝色箭头：本步输入来源 · 橙色箭头：本步输出去向"; color:"#8B9CB1"; font.pixelSize:11; wrapMode: Text.Wrap }
         }
         Rectangle {
             Layout.preferredWidth: Math.max(290, Math.min(360, flow.width * .36)); Layout.fillHeight: true
@@ -298,15 +346,17 @@ Item {
                     id: details; width: parent.width; spacing:12
                     Text { Layout.fillWidth:true; text:flow.title(); color:"#2B4E74"; font.pixelSize:18; font.weight:Font.DemiBold; wrapMode:Text.Wrap }
                     SourceLink {
-                        objectName:"flowAesInputSource"; visible:flow.aesExpanded && flow.selectedStep!=="roundKey" && flow.selectedStep!=="roundInput"; Layout.fillWidth:true
-                        descriptor:({origin:flow.aesStep===0?"输入来自「构造计数器」· 本块 AES 输入":"输入来自第 " + ((flow.operations[flow.aesStep-1] || {}).round || 0) + " 轮「" + flow.operationName((flow.operations[flow.aesStep-1] || {}).kind) + "」的输出",aesIndex:flow.aesStep-1,sourceField:"counter"})
+                        objectName:"flowAesInputSource"; visible:flow.isRoundOperation; Layout.fillWidth:true
+                        descriptor:flow.aesStep === flow.operations.findIndex(op=>op.round===flow.operation.round)
+                            ? ({origin:"输入来自「本轮输入」· 本轮初始状态",roundNode:"roundInput"})
+                            : ({origin:"输入来自本轮「" + flow.operationName((flow.operations[flow.aesStep-1] || {}).kind) + "」的输出",aesIndex:flow.aesStep-1})
                         onFollowed:row=>flow.followSource(row)
                     }
                     Text { objectName:"flowStepExplanation"; visible:flow.aesExpanded; Layout.fillWidth:true; text:flow.explanation(); color:"#5F748E"; font.pixelSize:12; lineHeight:1.3; wrapMode:Text.Wrap }
                     Text { visible:!flow.aesExpanded && flow.selectedStep==="counter"; Layout.fillWidth:true; text:'<font color="#397FBB">蓝色：上一步的 12 字节随机数</font><br><font color="#AC742C">黄色：本地追加的 4 字节计数值</font>'; font.pixelSize:11; lineHeight:1.3; textFormat:Text.RichText }
                     SoftButton { objectName:"flowExpandAesButton"; visible:!flow.aesExpanded && flow.selectedStep==="aes"; text:"展开 AES 轮运算 →"; compact:true; selected:true; accent:"#DDECFB"; onClicked:{ flow.aesExpanded=true; flow.aesStep=1; flow.selectedStep="sub" } }
                     RowLayout {
-                        visible:flow.aesExpanded && flow.selectedStep!=="roundKey" && flow.selectedStep!=="roundInput"
+                        visible:flow.isRoundOperation
                         Layout.fillWidth:true; spacing:10
                         ColumnLayout {
                             Layout.fillWidth:true
@@ -324,8 +374,8 @@ Item {
                             ByteMatrix { objectName:"flowOutputMatrix"; Layout.fillWidth:true; hexData:flow.operation.output || ""; compareHex:flow.operation.input || ""; selected:flow.selectedByte; onPicked:index=>flow.selectedByte=index }
                         }
                     }
-                    Text { visible:flow.aesExpanded && flow.selectedStep!=="roundKey" && flow.selectedStep!=="roundInput"; Layout.fillWidth:true; text:flow.byteExplanation(); color:"#557CA8"; font.pixelSize:12; wrapMode:Text.Wrap; font.family:"Consolas" }
-                    Text { visible:flow.aesExpanded && flow.operation.kind==="key" && flow.selectedStep!=="roundKey" && flow.selectedStep!=="roundInput"; Layout.fillWidth:true; text:"本轮密钥：\n"+flow.spaced(flow.operation.roundKey); color:"#8295AD"; font.pixelSize:11; wrapMode:Text.WrapAnywhere; font.family:"Consolas" }
+                    Text { visible:flow.isRoundOperation; Layout.fillWidth:true; text:flow.byteExplanation(); color:"#557CA8"; font.pixelSize:12; wrapMode:Text.Wrap; font.family:"Consolas" }
+                    Text { visible:flow.isRoundOperation && flow.operation.kind==="key"; Layout.fillWidth:true; text:"本轮密钥：\n"+flow.spaced(flow.operation.roundKey); color:"#8295AD"; font.pixelSize:11; wrapMode:Text.WrapAnywhere; font.family:"Consolas" }
                     RowLayout {
                         visible:!flow.aesExpanded && flow.selectedStep==="hash"
                         Layout.fillWidth:true
@@ -386,7 +436,7 @@ Item {
     component SourceLink: Text {
         id: originLink
         property var descriptor: ({})
-        readonly property bool linked: !!descriptor.sourceStep || descriptor.aesIndex!==undefined
+        readonly property bool linked: !!descriptor.sourceStep || !!descriptor.roundNode || descriptor.aesIndex!==undefined
         signal followed(var row)
         text:(linked?"↖ ":"")+(descriptor.origin || "")
         color:linked?"#387BB1":"#8A99AC";font.pixelSize:11;wrapMode:Text.Wrap;lineHeight:1.2

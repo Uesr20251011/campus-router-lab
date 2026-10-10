@@ -1,5 +1,7 @@
 #include <QtTest>
 #include <QTemporaryDir>
+#include <QFile>
+#include <QJsonDocument>
 
 #include "GraphAlgorithms.h"
 #include "GraphBackend.h"
@@ -10,6 +12,7 @@ class GraphTests : public QObject {
 private slots:
     void figure2HasMinimumCost41();
     void figure3HasMaximumFlow13();
+    void flowSampleMatchesCorrectedSavedPreset();
     void disconnectedGraphCannotHaveSpanningTree();
     void editingNodeAndLinkChangesGraph();
     void automaticLayoutAvoidsOverlapAndIsRepeatable();
@@ -48,6 +51,29 @@ void GraphTests::figure3HasMaximumFlow13() {
     for (const auto &step : flow.steps)
         hasPath |= step.pathNodes.size() >= 2;
     QVERIFY(hasPath);
+}
+
+void GraphTests::flowSampleMatchesCorrectedSavedPreset() {
+    QFile file(QFINDTESTDATA("fixtures/flow-sample.json"));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QVariantMap expected = QJsonDocument::fromJson(file.readAll()).toVariant().toMap();
+    QTemporaryDir directory;
+    GraphBackend backend(nullptr, directory.filePath("presets.json"));
+    backend.loadFlowSample();
+    QCOMPARE(backend.links(), expected.value("links").toList());
+    QCOMPARE(backend.nodes(), expected.value("nodes").toList());
+    const Graph graph = sampleFlowGraph();
+    // Independently enumerate every source/sink cut to check the teaching result.
+    qint64 minimumCut = 1000;
+    for (int mask = 1; mask < 128; mask += 2) {
+        qint64 capacity = 0;
+        for (const auto &link : graph.links)
+            if ((mask & (1 << (link.u - 1))) && !(mask & (1 << (link.v - 1))))
+                capacity += link.capacity;
+        minimumCut = std::min(minimumCut, capacity);
+    }
+    QCOMPARE(minimumCut, qint64(13));
+    QCOMPARE(backend.run("flow", 1, 8).value("value").toLongLong(), minimumCut);
 }
 
 void GraphTests::primUsesChosenStartAndDijkstraAnimatesShortestRoute() {

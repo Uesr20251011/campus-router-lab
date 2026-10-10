@@ -16,6 +16,9 @@ private slots:
     void authenticationTraceMatchesTheGcmVector();
     void livePacketTraceAgreesWithWindowsEncryption();
     void changedPacketsExplainFailureWithoutReleasingPlaintext();
+    void routeEditsReplayDownstreamAndRefreshReceiver();
+    void insertedBytesDoNotFreezeUnchangedDownstreamContent();
+    void arbitraryInsertionsAndDeletionsReachReceiver();
 };
 
 namespace {
@@ -265,6 +268,86 @@ void SecureTests::invalidInputsAreRejected() {
     const QVariantMap generated = service.generateKey();
     QVERIFY(generated.value("success").toBool());
     QCOMPARE(generated.value("key").toString().size(), 64);
+}
+
+void SecureTests::routeEditsReplayDownstreamAndRefreshReceiver() {
+    SecureMessageService service;
+    QObject *channel = service.channel();
+    const QString key(64, 'a');
+    QVERIFY(startChannel(channel, "route edits", key, true, {1, 3, 7, 8}, -1));
+    bool ok = false;
+    QVERIFY(QMetaObject::invokeMethod(channel, "completeRoute", Q_RETURN_ARG(bool, ok), Q_ARG(QString, key)));
+    QVERIFY(ok);
+    QCOMPARE(state(channel).value("phase").toString(), QStringLiteral("decrypted"));
+    const QString original = state(channel).value("senderPacket").toString();
+    QByteArray bytes = QByteArray::fromBase64(original.toLatin1());
+    auto edit = [&](int node, const QString &packet) {
+        bool result = false;
+        QMetaObject::invokeMethod(channel, "editNode", Q_RETURN_ARG(bool, result), Q_ARG(int, node), Q_ARG(QString, packet));
+        return result;
+    };
+    bytes[29] = char(bytes[29] ^ 1);
+    QVERIFY(edit(7, QString::fromLatin1(bytes.toBase64())));
+    bytes[28] = char(bytes[28] ^ 2);
+    QByteArray upstream = QByteArray::fromBase64(original.toLatin1());
+    upstream[28] = char(upstream[28] ^ 2);
+    QVERIFY(edit(3, QString::fromLatin1(upstream.toBase64())));
+    const auto nodes = state(channel).value("nodeStates").toList();
+    QCOMPARE(nodes[2].toMap().value("inputPacket").toString(), QString::fromLatin1(upstream.toBase64()));
+    QCOMPARE(state(channel).value("receivedPacket").toString(), QString::fromLatin1(bytes.toBase64()));
+    QCOMPARE(state(channel).value("phase").toString(), QStringLiteral("rejected"));
+    QVERIFY(state(channel).value("plaintext").toString().isEmpty());
+    QVERIFY(!edit(1, "bad"));
+    QVERIFY(!edit(8, "bad"));
+    QVERIFY(edit(3, original + "!"));
+    QVERIFY(state(channel).value("receivedPacket").toString().endsWith('!'));
+    QVERIFY(state(channel).value("error").toString().contains("Base64"));
+    QVERIFY(edit(7, "not base64!"));
+    QVERIFY(channel->property("receiverTrace").toMap().value("plaintext").toString().isEmpty());
+    QVERIFY(state(channel).value("plaintext").toString().isEmpty());
+    for (int node : {3, 7}) {
+        QVERIFY(QMetaObject::invokeMethod(channel, "restoreNode", Q_RETURN_ARG(bool, ok), Q_ARG(int, node)));
+        QVERIFY(ok);
+    }
+    QCOMPARE(state(channel).value("receivedPacket").toString(), original);
+    QCOMPARE(state(channel).value("plaintext").toString(), QStringLiteral("route edits"));
+    QVERIFY(!decryptChannel(channel, QString(64, 'b')));
+    QVERIFY(!state(channel).value("matchesOriginal").toBool());
+}
+
+void SecureTests::insertedBytesDoNotFreezeUnchangedDownstreamContent() {
+    SecureMessageService service;
+    QObject *channel = service.channel();
+    QVERIFY(startChannel(channel, "abcdefgh", {}, false, {1, 3, 7, 8}, -1));
+    bool ok = false;
+    QMetaObject::invokeMethod(channel, "completeRoute", Q_RETURN_ARG(bool, ok), Q_ARG(QString, QString{}));
+    QVERIFY(ok);
+    QMetaObject::invokeMethod(channel, "editNode", Q_RETURN_ARG(bool, ok), Q_ARG(int, 7), Q_ARG(QString, QStringLiteral("aXbcdefgYh")));
+    QVERIFY(ok);
+    QMetaObject::invokeMethod(channel, "editNode", Q_RETURN_ARG(bool, ok), Q_ARG(int, 3), Q_ARG(QString, QStringLiteral("abcQefgh")));
+    QVERIFY(ok);
+    QCOMPARE(state(channel).value("receivedPacket").toString(), QStringLiteral("aXbcQefgYh"));
+    QCOMPARE(state(channel).value("plaintext").toString(), QStringLiteral("aXbcQefgYh"));
+    QVERIFY(!state(channel).value("matchesOriginal").toBool());
+}
+
+void SecureTests::arbitraryInsertionsAndDeletionsReachReceiver() {
+    SecureMessageService service;
+    QObject *channel = service.channel();
+    for (const auto &fixture : {qMakePair(QStringLiteral("abcdefgh"), QStringLiteral("abcgh")),
+                               qMakePair(QStringLiteral("abcdefgh"), QStringLiteral("XbcdefgYh")),
+                               qMakePair(QStringLiteral("abcdefgh"), QStringLiteral("abc12de34fgh56")),
+                               qMakePair(QStringLiteral("abcdefgh"), QString{}),
+                               qMakePair(QStringLiteral("中文网络"), QStringLiteral("中文X网络!"))}) {
+        QVERIFY(startChannel(channel, fixture.first, {}, false, {1, 3, 7, 8}, -1));
+        bool ok = false;
+        QMetaObject::invokeMethod(channel, "completeRoute", Q_RETURN_ARG(bool, ok), Q_ARG(QString, QString{}));
+        QVERIFY(ok);
+        QMetaObject::invokeMethod(channel, "editNode", Q_RETURN_ARG(bool, ok), Q_ARG(int, 3), Q_ARG(QString, fixture.second));
+        QVERIFY(ok);
+        QCOMPARE(state(channel).value("receivedPacket").toString(), fixture.second);
+        QCOMPARE(state(channel).value("plaintext").toString(), fixture.second);
+    }
 }
 
 QTEST_MAIN(SecureTests)

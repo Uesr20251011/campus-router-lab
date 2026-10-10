@@ -13,14 +13,21 @@ Item {
     readonly property bool compact: host.height < 660
     readonly property int panelWidth: host.width < 1100 ? 292 : 320
     readonly property var candidates: host.securePreviewRoute.slice(1, -1)
-    readonly property int observer: candidates.length && observationChoice.currentIndex >= 0 && observationChoice.currentIndex < candidates.length
-                                    ? candidates[observationChoice.currentIndex] : -1
+    readonly property int observer: -1
     readonly property var route: phase === "idle" ? host.securePreviewRoute : snapshot.route || []
-    readonly property int stage: phase === "idle" ? 0 : phase === "transit" || phase === "intercepted" ? 1 : 2
-    readonly property color tone: phase === "rejected" ? "#B65360" : phase === "intercepted" ? "#AC7334" : phase === "decrypted" ? "#258470" : "#3778BE"
+    readonly property int stage: phase === "idle" || nodeKind === "sender" ? 0 : middleNode ? 1 : 2
+    readonly property color tone: middleNode ? nodeState.attacked ? "#B65360" : "#258470" : nodeKind === "receiver" ? phase === "rejected" ? "#B65360" : "#258470" : "#3778BE"
     property alias message: messageInput.text
     property alias testMessage1: testInput1.text
     property alias testMessage2: testInput2.text
+    property int selectedRouteNode: -1
+    readonly property int nodeIndex: route.indexOf(selectedRouteNode)
+    readonly property bool middleNode: nodeIndex > 0 && nodeIndex < route.length - 1
+    readonly property string nodeKind: selectedRouteNode === snapshot.target ? "receiver" : middleNode ? "observer" : "sender"
+    readonly property var nodeState: (snapshot.nodeStates || [])[nodeIndex] || ({})
+    readonly property string nodePacket: nodeState.outputPacket !== undefined ? nodeState.outputPacket : snapshot.senderPacket || ""
+    property bool attackHex: false
+    property string attackError: ""
     property string detailKind: "sender"
     property string verificationResult: ""
     property bool verificationPassed: false
@@ -28,13 +35,40 @@ Item {
     property var flowTrace: ({})
     property string flowEndpoint: "sender"
     property int flowPacketId: 0
-    readonly property string detailPacket: detailKind === "sender" ? snapshot.senderPacket || "" : detailKind === "observer" ? snapshot.capturedPacket ? snapshot.wirePacket || "" : "" : snapshot.receivedPacket || ""
+    readonly property string detailPacket: detailKind === "sender" ? snapshot.senderPacket || "" : detailKind === "observer" ? nodePacket : snapshot.receivedPacket || ""
     readonly property var packetParts: detailPacket && snapshot.encrypted && typeof secureService !== "undefined" ? secureService.inspectPacket(detailPacket) : ({})
-    onCandidatesChanged: observationChoice.currentIndex = 0
 
-    function observeNode(id) {
-        const index = candidates.indexOf(id)
-        if (index >= 0) observationChoice.currentIndex = index
+
+    function selectRouteNode(id) {
+        if (route.indexOf(id) >= 0) selectedRouteNode = id
+    }
+    function observeNode(id) { selectRouteNode(id) }
+    function packetHex(packet) {
+        if (!packet || typeof secureService === "undefined") return ""
+        const parts = secureService.inspectPacket(packet)
+        return parts.success ? (parts.nonce || "") + (parts.tag || "") + (parts.ciphertext || "") : ""
+    }
+    function reloadAttack() {
+        attackError = ""
+        attackInput.text = attackHex ? packetHex(nodePacket) : nodePacket
+    }
+    function openAttack() {
+        if (!middleNode || !snapshot.packetId) return
+        attackHex = false; reloadAttack(); attackPopup.open()
+    }
+    function applyAttack() {
+        let packet = attackInput.text
+        if (attackHex) {
+            const hex = packet.replace(/\s/g, "")
+            if (hex.length % 2 || !/^[0-9a-fA-F]*$/.test(hex)) {
+                attackError = "请输入偶数位的十六进制字节，可用空格或换行分隔。"; return
+            }
+            packet = secureService.packetFromHex(hex)
+        }
+        if (!host.secureChannel.editNode(selectedRouteNode, packet)) {
+            attackError = snapshot.error || "修改失败"; return
+        }
+        host.secureError = ""; host.updateSecureHistory(); attackPopup.close()
     }
     function scenario(value) {
         if (host.secureBusy) return
@@ -55,25 +89,32 @@ Item {
         flowView.selectedStep = endpoint === "receiver" ? "verify" : "bytes"
         flowPopup.open()
     }
-    onSnapshotChanged: if (flowPopup.visible && snapshot.packetId !== flowPacketId) flowPopup.close()
+    onSnapshotChanged: {
+        if (phase === "idle") selectedRouteNode = -1
+        if (flowPopup.visible) {
+            if (snapshot.packetId !== flowPacketId) flowPopup.close()
+            else {
+                const computed = host.secureChannel.processTrace(flowEndpoint, flowTrace.blockIndex || 0)
+                if (computed.success) flowTrace = computed
+                else flowPopup.close()
+            }
+        }
+        if (phase === "idle") attackPopup.close()
+    }
     function packetLabel() { return snapshot.packetId ? "包 #" + String(snapshot.packetId).padStart(3, "0") : "本次通信路径" }
     function title() {
         if (phase === "idle") return "R" + panel.source + " · 输入发送消息"
-        if (phase === "intercepted") return "R" + snapshot.currentNode + (snapshot.encrypted ? " · 只截获了密文" : " · 读到了原文")
-        if (phase === "received") return "R" + snapshot.target + (snapshot.encrypted ? " · 收到密文" : " · 收到明文")
-        if (phase === "decrypted") return "R" + snapshot.target + (snapshot.encrypted ? " · 解密成功" : " · 读取成功")
-        if (phase === "rejected") return "R" + snapshot.target + " · 拒绝解密"
-        return snapshot.encrypted ? "消息已加密，正在传输" : "消息正在以明文传输"
+        if (nodeKind === "sender") return "R" + snapshot.source + " · 发送端"
+        if (middleNode) return "R" + selectedRouteNode + (nodeState.attacked ? " · 已实施攻击" : " · 中间转发节点")
+        return "R" + snapshot.target + (phase === "decrypted" ? " · 接收成功" : " · 接收校验失败")
     }
     function explanation() {
-        if (phase === "idle") return "现场输入任意内容，点击发送后再沿路径观察。"
-        if (phase === "intercepted") return snapshot.encrypted ? "R" + snapshot.currentNode + " 没有通信密钥，无法从这份数据恢复消息。" : "R" + snapshot.currentNode + " 没有密钥，也能读到消息。"
-        if (phase === "received") return "R" + snapshot.target + " 收到的是途中转发的数据包。"
-        if (phase === "decrypted") return snapshot.matchesOriginal ? "✓ 解密结果与发送时的原文逐字一致。" : "解密结果与发送原文不同。"
-        if (phase === "rejected") return snapshot.tampered ? "途中修改了密文，接收端的完整性校验未通过。" : "接收端密钥不匹配，校验未通过。"
-        return "R" + snapshot.currentNode + " → R" + snapshot.route[snapshot.hop + 1] + "，到观察节点后会自动停下。"
+        if (phase === "idle") return "输入消息后展示完整路径。点击任一节点查看数据与说明。"
+        if (nodeKind === "sender") return "此节点生成发送包。可进入具体步骤查看本次加密与认证计算。"
+        if (middleNode) return (snapshot.encrypted ? "此节点只有公开包，无通信密钥。" : "明文传输，此节点可直接读取消息。") + (nodeState.changed ? "当前包已被修改。" : "当前包与发送包一致。") + "可编辑包内容实施攻击，所有后续节点会立即更新。"
+        if (phase === "rejected") return snapshot.error || "接收端拒绝输出未经认证的原文。"
+        return snapshot.matchesOriginal ? "接收结果与发送时的消息逐字一致。" : "接收消息与发送消息不同。"
     }
-
     ColumnLayout {
         id: story
         x: parent.width - panel.panelWidth - 16; y: 16
@@ -88,7 +129,7 @@ Item {
         RowLayout {
             Layout.fillWidth: true; spacing: 5
             Repeater {
-                model: ["发送", "截获", "解密"]
+                model: ["发送", "途中", "接收"]
                 delegate: RowLayout {
                     required property int index
                     required property string modelData
@@ -129,17 +170,17 @@ Item {
                     radius: 12; color: panel.phase === "rejected" ? "#FFF5F6" : "#F5F8FC"
                     ColumnLayout {
                         anchors.fill: parent; anchors.margins: 12; spacing: 8
-                        Text { text: panel.phase === "rejected" ? "校验结果" : panel.phase === "decrypted" ? snapshot.encrypted ? "解密结果" : "收到的消息" : snapshot.encrypted ? "此节点的数据 · 密文节选" : "此节点的数据 · 明文"; color: "#8A99AE"; font.pixelSize: 11 }
+                        Text { text: panel.nodeKind === "receiver" ? panel.phase === "rejected" ? "校验结果" : "接收消息" : snapshot.encrypted ? "此节点的传输包 · Base64" : "此节点的明文包"; color: "#8A99AE"; font.pixelSize: 11 }
                         TextArea {
                             objectName: "secureStageData"
                             Layout.fillWidth: true; Layout.fillHeight: true
                             readOnly: true; selectByMouse: true; wrapMode: TextEdit.WrapAnywhere
-                            text: panel.phase === "decrypted" ? snapshot.plaintext || "" : panel.phase === "rejected" ? "校验未通过" : snapshot.encrypted ? (snapshot.wirePacket || "").slice(0, 128) + ((snapshot.wirePacket || "").length > 128 ? "…" : "") : snapshot.wirePacket || ""
-                            font.family: panel.phase === "decrypted" || snapshot.encrypted === false ? "Microsoft YaHei UI" : "Consolas"
-                            font.pixelSize: panel.phase === "decrypted" ? 16 : 13; color: panel.phase === "rejected" ? "#B65360" : "#3C5878"
+                            text: panel.nodeKind === "receiver" ? panel.phase === "rejected" ? "校验未通过，未输出明文" : snapshot.plaintext || "" : panel.nodePacket
+                            font.family: (panel.nodeKind === "receiver" && panel.phase === "decrypted") || snapshot.encrypted === false ? "Microsoft YaHei UI" : "Consolas"
+                            font.pixelSize: panel.nodeKind === "receiver" && panel.phase === "decrypted" ? 16 : 13; color: panel.nodeKind === "receiver" && panel.phase === "rejected" ? "#B65360" : "#3C5878"
                             padding: 0; background: Item {}
                         }
-                        Text { visible: !!snapshot.tampered; Layout.fillWidth: true; text: "已改 1 位：" + snapshot.beforeByte + " → " + snapshot.afterByte; color: "#B65360"; font.pixelSize: 12 }
+                        Text { visible: !!snapshot.tampered; Layout.fillWidth: true; text: "路径中已有 " + (snapshot.nodeStates || []).filter(n => n.attacked).length + " 个节点实施攻击"; color: "#B65360"; font.pixelSize: 12 }
                     }
                 }
                 Text { visible: host.secureError.length > 0; Layout.fillWidth: true; text: host.secureError; color: "#B65360"; font.pixelSize: 12; wrapMode: Text.Wrap }
@@ -149,24 +190,24 @@ Item {
                     SoftButton {
                         objectName: "securePacketPeekButton"
                         text: "完整数据"; compact: true
-                        onClicked: panel.openDetail(panel.phase === "intercepted" ? "observer" : snapshot.receivedPacket ? "receiver" : "sender")
+                        onClicked: panel.openDetail(panel.nodeKind)
                     }
                     SoftButton {
-                        objectName: "secureTamperButton"; visible: panel.phase === "intercepted" && snapshot.encrypted
-                        text: snapshot.tampered ? "撤销篡改" : "尝试篡改"; compact: true
-                        enabled: panel.phase === "intercepted" && snapshot.encrypted
-                        onClicked: snapshot.tampered ? host.secureChannel.restore() : host.tamperSecure()
+                        objectName: "secureTamperButton"; visible: panel.middleNode
+                        text: "编辑包 / 攻击"; compact: true; onClicked: panel.openAttack()
                     }
-                    SoftButton { objectName: "securePlayButton"; visible: panel.phase === "transit"; text: host.secureRunning ? "暂停" : "继续"; compact: true; onClicked: host.secureRunning = !host.secureRunning }
-                    SoftButton { objectName: "secureChangeKeyButton"; visible: panel.phase === "rejected"; text: "调整密钥重试"; compact: true; onClicked: keyPopup.open() }
+                    SoftButton { objectName: "secureChangeKeyButton"; visible: panel.nodeKind === "receiver" && panel.phase === "rejected"; text: "调整密钥"; compact: true; onClicked: keyPopup.open() }
                     Item { Layout.fillWidth: true }
                 }
-                SoftButton { objectName: "secureFlowButton"; Layout.fillWidth: true; visible: !!snapshot.packetId && snapshot.encrypted && panel.phase !== "intercepted"; text: snapshot.receivedPacket ? "查看接收校验结构图" : "查看发送加密结构图"; compact: true; onClicked: panel.openFlow(snapshot.receivedPacket ? "receiver" : "sender") }
-                SoftButton { objectName: "secureStepButton"; Layout.fillWidth: true; visible: panel.phase === "transit"; text: "下一跳 →"; selected: true; accent: "#DDECFB"; onClicked: host.advanceSecure() }
+                SoftButton {
+                    objectName: "secureRestoreNodeButton"; Layout.fillWidth: true; visible: panel.middleNode && !!panel.nodeState.attacked
+                    text: "撤销攻击"; compact: true
+                    onClicked: { host.secureChannel.restoreNode(panel.selectedRouteNode); host.updateSecureHistory() }
+                }
+                SoftButton { objectName: "secureFlowButton"; Layout.fillWidth: true; visible: !!snapshot.packetId && snapshot.encrypted && !panel.middleNode; text: panel.nodeKind === "receiver" ? "查看接收端具体步骤 →" : "查看发送端具体步骤 →"; compact: true; onClicked: panel.openFlow(panel.nodeKind) }
                 SoftButton { objectName: "secureSendButton"; Layout.fillWidth: true; visible: panel.phase === "idle"; text: host.secureScenario === "plaintext" ? "发送明文 →" : "加密并发送 →"; selected: true; accent: "#DDECFB"; enabled: !host.secureBusy && messageInput.text.length > 0; onClicked: host.sendSecure() }
-                SoftButton { objectName: "secureForwardButton"; Layout.fillWidth: true; visible: panel.phase === "intercepted"; text: snapshot.tampered ? "转发篡改后的包 →" : "原样转发 →"; selected: true; accent: "#DDECFB"; enabled: panel.phase === "intercepted"; onClicked: host.forwardSecure() }
-                SoftButton { objectName: "secureDecryptButton"; Layout.fillWidth: true; visible: panel.phase === "received"; text: snapshot.encrypted ? "用接收端密钥解密 →" : "读取收到的消息 →"; selected: true; accent: "#DDECFB"; enabled: !!snapshot.receivedPacket; onClicked: host.decryptSecure() }
-                SoftButton { objectName: "secureRestartButton"; Layout.fillWidth: true; visible: panel.phase === "decrypted" || panel.phase === "rejected"; text: "换条消息再试 →"; selected: true; accent: "#DDECFB"; onClicked: { host.clearSecurePacket(); messageInput.forceActiveFocus(); messageInput.selectAll() } }
+                SoftButton { objectName: "secureRestartButton"; Layout.fillWidth: true; visible: !!snapshot.packetId; text: "换条消息再试 →"; selected: true; accent: "#DDECFB"; onClicked: { host.clearSecurePacket(); messageInput.forceActiveFocus(); messageInput.selectAll() } }
+
             }
         }
         Text { Layout.fillWidth: true; text: "真实 AES 加解密 · 本机模拟路径转发"; color: "#96A4B6"; font.pixelSize: 10; horizontalAlignment: Text.AlignHCenter }
@@ -177,6 +218,45 @@ Item {
         Layout.fillWidth: true; font.family: "Consolas"; font.pixelSize: 12; color: "#48617F"
         padding: 10
         background: Rectangle { radius: 10; color: "#F5F8FD"; border.color: "#E0E8F3" }
+    }
+
+    Popup {
+        id: attackPopup; objectName: "secureAttackPopup"
+        parent: Overlay.overlay; anchors.centerIn: parent
+        width: Math.min(640, host.width - 48); height: Math.min(560, host.height - 48)
+        modal: true; dim: true; focus: true; padding: 22
+        background: Rectangle { radius: 20; color: "#FFFFFF"; border.color: "#DCE5F2" }
+        Overlay.modal: Rectangle { color: "#550E2035" }
+        ColumnLayout {
+            anchors.fill: parent; spacing: 12
+            Text { text: "R" + panel.selectedRouteNode + " · 修改传输包"; color: "#344862"; font.pixelSize: 20; font.weight: Font.DemiBold }
+            Caption { text: "以下为此节点当前转发的完整包。可以修改、插入或删除内容；应用后立即更新后续节点及接收结果。后续攻击保留其修改的字节，其他字节继承新的上游包。" }
+            RowLayout {
+                Layout.fillWidth: true
+                SoftButton { text: "原始包"; compact: true; selected: !panel.attackHex; onClicked: { panel.attackHex = false; panel.reloadAttack() } }
+                SoftButton { text: "十六进制字节"; visible: snapshot.encrypted && panel.packetHex(panel.nodePacket).length > 0; compact: true; selected: panel.attackHex; onClicked: { panel.attackHex = true; panel.reloadAttack() } }
+            }
+            Caption { text: panel.attackHex ? "前 12 字节为随机数，随后 16 字节为标签，其余为密文，均可修改。切换展示方式会重新载入当前包。" : snapshot.encrypted ? "完整 raw 包（Base64）。也可输入无效或截断的包，观察接收端拒绝处理。" : "完整明文包。" }
+            ScrollView {
+                id: attackScroll
+                Layout.fillWidth: true; Layout.fillHeight: true; clip: true
+                contentWidth: availableWidth
+                TextArea {
+                    id: attackInput; objectName: "secureAttackInput"
+                    width: attackScroll.availableWidth
+                    wrapMode: TextEdit.WrapAnywhere; selectByMouse: true
+                    font.family: "Consolas"; font.pixelSize: 13; color: "#344862"
+                    background: Rectangle { radius: 10; color: "#F5F8FD"; border.color: "#E0E8F3" }
+                }
+            }
+            Caption { text: panel.attackError; color: "#B65360"; visible: panel.attackError.length > 0 }
+            RowLayout {
+                Layout.fillWidth: true
+                SoftButton { objectName: "secureApplyAttackButton"; text: "实施攻击并更新路径"; compact: true; selected: true; onClicked: panel.applyAttack() }
+                Item { Layout.fillWidth: true }
+                SoftButton { text: "取消"; compact: true; onClicked: attackPopup.close() }
+            }
+        }
     }
 
     Popup {
@@ -236,15 +316,7 @@ Item {
                 Caption { text: "传输方式" }
                 SoftComboBox { Layout.preferredWidth: 240; model: ["加密传输（AES）", "明文传输（对照）"]; currentIndex: host.secureScenario === "plaintext" ? 1 : 0; enabled: !host.secureBusy; onActivated: index => panel.scenario(index === 1 ? "plaintext" : "encrypted") }
             }
-            RowLayout {
-                Layout.fillWidth: true
-                Caption { text: "暂停观察的节点" }
-                SoftComboBox {
-                    id: observationChoice; objectName: "secureObserverChoice"; Layout.preferredWidth: 240
-                    model: panel.candidates.length ? panel.candidates.map(id => "R" + id).concat(["不暂停"]) : ["无中间节点"]
-                    currentIndex: 0; enabled: !host.secureBusy && panel.candidates.length > 0
-                }
-            }
+            Caption { text: "路径上的每个中间节点均可攻击。点击节点后编辑包内容，后续路径与接收结果会立即更新。" }
             RowLayout {
                 Layout.fillWidth: true
                 SoftButton { text: "通信密钥"; compact: true; onClicked: { settingsPopup.close(); keyPopup.open() } }
@@ -306,8 +378,8 @@ Item {
                     id: packetColumn; width: parent.width; spacing: 10
                     Caption { text: snapshot.encrypted ? "传输包（Base64 是展示编码，加密由 AES-GCM 完成）" : "传输包（未加密的明文）" }
                     DataBox { Layout.preferredHeight: 120; text: panel.detailPacket }
-                    Caption { visible: panel.detailKind === "observer" && snapshot.tampered; text: "篡改前的截获包" }
-                    DataBox { visible: panel.detailKind === "observer" && snapshot.tampered; Layout.preferredHeight: 76; text: snapshot.capturedPacket || "" }
+                    Caption { visible: panel.detailKind === "observer" && !!panel.nodeState.attacked; text: "篡改前的截获包" }
+                    DataBox { visible: panel.detailKind === "observer" && !!panel.nodeState.attacked; Layout.preferredHeight: 76; text: panel.nodeState.inputPacket || "" }
                     SoftButton { visible: snapshot.encrypted; text: panel.showPacketParts ? "收起包结构 ▴" : "解析包结构 ▾"; compact: true; onClicked: panel.showPacketParts = !panel.showPacketParts }
                     Caption { visible: snapshot.encrypted && panel.showPacketParts; text: "包内随机数 · 12 字节" }
                     DataBox { visible: snapshot.encrypted && panel.showPacketParts; Layout.preferredHeight: 40; text: packetParts.nonce || "" }
@@ -315,12 +387,12 @@ Item {
                     DataBox { visible: snapshot.encrypted && panel.showPacketParts; Layout.preferredHeight: 52; text: packetParts.tag || "" }
                     Caption { visible: snapshot.encrypted && panel.showPacketParts; text: "从本包解析出的密文字节（十六进制）" }
                     DataBox { visible: snapshot.encrypted && panel.showPacketParts; Layout.preferredHeight: 80; text: packetParts.ciphertext || "" }
-                    Caption { visible: !!snapshot.capturedPacket && snapshot.encrypted; text: "独立验证仅使用你提供的密文和密钥，不读取发送原文。" }
+                    Caption { visible: !!snapshot.packetId && snapshot.encrypted; text: "独立验证仅使用你提供的密文和密钥，不读取发送原文。" }
                     SoftButton {
-                        visible: !!snapshot.capturedPacket && snapshot.encrypted
+                        visible: !!snapshot.packetId && snapshot.encrypted
                         text: "提供密钥，独立验证这份包"; compact: true; selected: true; accent: "#DDECFB"
                         onClicked: {
-                            verificationPacket.text = panel.detailKind === "receiver" ? snapshot.receivedPacket || "" : panel.detailKind === "sender" ? snapshot.senderPacket || "" : snapshot.wirePacket || ""
+                            verificationPacket.text = panel.detailKind === "receiver" ? snapshot.receivedPacket || "" : panel.detailKind === "sender" ? snapshot.senderPacket || "" : panel.nodePacket
                             verificationKey.text = ""
                             panel.verificationResult = ""
                             detailPopup.close(); verificationPopup.open()

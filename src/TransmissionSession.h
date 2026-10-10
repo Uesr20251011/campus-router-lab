@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QVariantMap>
 #include <QVariantList>
+#include <QMap>
 
 class SecureMessageService;
 
@@ -25,12 +26,20 @@ public:
     Q_INVOKABLE bool tamper();
     Q_INVOKABLE bool restore();
     Q_INVOKABLE bool decrypt(QString receiverKey);
+    Q_INVOKABLE bool completeRoute(QString receiverKey);
+    Q_INVOKABLE bool editNode(int node, QString packet);
+    Q_INVOKABLE bool restoreNode(int node);
     Q_INVOKABLE void reset();
 signals:
     void stateChanged();
 private:
     bool fail(const QString &error);
     void event(const QString &description);
+    void rebuildRoute();
+    struct Edit { int offset; int removed; QByteArray replacement; };
+    static QList<Edit> packetEdits(const QByteArray &before, const QByteArray &after);
+    struct NodeEdit { bool binary; QList<Edit> changes; QList<Edit> rawChanges; };
+    QMap<int, NodeEdit> m_edits;
     SecureMessageService *m_service;
     QVariantMap m_state;
     QVariantMap m_senderTrace, m_receiverTrace;

@@ -1,11 +1,59 @@
 #include "TransmissionSession.h"
 #include "SecureMessageService.h"
 #include <QSet>
+#include <functional>
+#include <QVector>
+
+namespace {
+// Myers' bidirectional search finds a shared boundary in linear space.
+QPair<int, int> diffBoundary(const QByteArray &a, const QByteArray &b) {
+    const int n = int(a.size()), m = int(b.size()), depth = (n + m + 1) / 2;
+    const int offset = depth + 1, size = 2 * depth + 3, delta = n - m;
+    QVector<int> forward(size, -1), reverse(size, -1);
+    forward[offset + 1] = reverse[offset + 1] = 0;
+    const bool odd = delta % 2 != 0;
+    int fStart = 0, fEnd = 0, rStart = 0, rEnd = 0;
+    for (int d = 0; d <= depth; ++d) {
+        for (int k = -d + fStart; k <= d - fEnd; k += 2) {
+            const int p = offset + k;
+            int x = k == -d || (k != d && forward[p - 1] < forward[p + 1])
+                    ? forward[p + 1] : forward[p - 1] + 1;
+            int y = x - k;
+            while (x < n && y < m && x >= 0 && y >= 0 && a[x] == b[y]) { ++x; ++y; }
+            forward[p] = x;
+            if (x > n) fEnd += 2;
+            else if (y > m) fStart += 2;
+            else if (odd) {
+                const int other = offset + delta - k;
+                if (other >= 0 && other < size && reverse[other] >= 0 && x >= n - reverse[other])
+                    return {x, y};
+            }
+        }
+        for (int k = -d + rStart; k <= d - rEnd; k += 2) {
+            const int p = offset + k;
+            int x = k == -d || (k != d && reverse[p - 1] < reverse[p + 1])
+                    ? reverse[p + 1] : reverse[p - 1] + 1;
+            int y = x - k;
+            while (x < n && y < m && x >= 0 && y >= 0 && a[n-x-1] == b[m-y-1]) { ++x; ++y; }
+            reverse[p] = x;
+            if (x > n) rEnd += 2;
+            else if (y > m) rStart += 2;
+            else if (!odd) {
+                const int other = offset + delta - k;
+                if (other >= 0 && other < size && forward[other] >= 0 && forward[other] >= n - x)
+                    return {forward[other], forward[other] - (delta - k)};
+            }
+        }
+    }
+    return {-1, -1};
+}
+}
 
 TransmissionSession::TransmissionSession(SecureMessageService *service)
     : QObject(service), m_service(service) { reset(); }
 
 void TransmissionSession::reset() {
+    m_edits.clear();
     m_senderTrace.clear(); m_receiverTrace.clear();
     m_senderKey.clear(); m_receiverKey.clear();
     m_state = {{"phase", "idle"}, {"packetId", 0}, {"hop", 0}, {"currentNode", -1},
@@ -61,6 +109,7 @@ bool TransmissionSession::start(QString plaintext, QString key, bool encrypted,
     }
     m_senderTrace.clear(); m_receiverTrace.clear();
     m_senderKey = encrypted ? key : QString{}; m_receiverKey.clear();
+    m_edits.clear();
     m_state = {{"phase", "transit"}, {"packetId", ++m_sequence}, {"original", plaintext},
                {"encrypted", encrypted}, {"route", route}, {"hop", 0},
                {"currentNode", route.first()}, {"source", route.first()}, {"target", route.last()},
@@ -147,6 +196,7 @@ bool TransmissionSession::decrypt(QString receiverKey) {
     if (phase != "received" && phase != "rejected" && phase != "decrypted")
         return fail(QStringLiteral("数据包尚未到达接收端"));
     m_state["plaintext"] = "";
+    m_state["matchesOriginal"] = false;
     m_state["error"] = "";
     const QString received = m_state.value("receivedPacket").toString();
     if (m_state.value("encrypted").toBool()) {
@@ -164,7 +214,114 @@ bool TransmissionSession::decrypt(QString receiverKey) {
     }
     m_state["matchesOriginal"] = m_state.value("plaintext") == m_state.value("original");
     m_state["phase"] = "decrypted";
-    event(m_state.value("encrypted").toBool() ? QStringLiteral("认证通过，解密原文与发送快照一致") : QStringLiteral("读取明文，与发送快照一致"));
+    event(m_state.value("matchesOriginal").toBool() ? QStringLiteral("接收结果与发送快照一致") : QStringLiteral("接收结果与发送快照不同"));
     emit stateChanged();
     return true;
+}
+
+bool TransmissionSession::completeRoute(QString receiverKey) {
+    if (!m_state.value("packetId").toInt()) return false;
+    m_state["staticRoute"] = true;
+    m_receiverKey = receiverKey;
+    rebuildRoute();
+    return true;
+}
+
+bool TransmissionSession::editNode(int node, QString packet) {
+    const QVariantList route = m_state.value("route").toList();
+    const int index = route.indexOf(node);
+    if (!m_state.value("staticRoute").toBool() || index <= 0 || index >= route.size() - 1)
+        return fail(QStringLiteral("只能在本次路径的中间节点实施攻击"));
+    if (packet.toUtf8().size() > 65536) return fail(QStringLiteral("修改后的包不能超过 64 KB"));
+    const QString input = m_state.value("nodeStates").toList()[index].toMap().value("inputPacket").toString();
+    const auto beforeDecoded = QByteArray::fromBase64Encoding(input.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
+    const auto afterDecoded = QByteArray::fromBase64Encoding(packet.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
+    NodeEdit edit;
+    edit.binary = m_state.value("encrypted").toBool() && beforeDecoded && afterDecoded;
+    const QByteArray before = edit.binary ? *beforeDecoded : input.toUtf8();
+    const QByteArray after = edit.binary ? *afterDecoded : packet.toUtf8();
+    edit.changes = packetEdits(before, after);
+    edit.rawChanges = packetEdits(input.toUtf8(), packet.toUtf8());
+    if (edit.changes.isEmpty()) m_edits.remove(node);
+    else m_edits[node] = edit;
+    event(QStringLiteral("R%1 更新包内容，重新计算所有后续节点").arg(node));
+    rebuildRoute();
+    return true;
+}
+
+bool TransmissionSession::restoreNode(int node) {
+    if (!m_state.value("staticRoute").toBool() || !m_edits.contains(node)) return false;
+    m_edits.remove(node);
+    event(QStringLiteral("R%1 撤销本节点攻击，保留其他节点的修改").arg(node));
+    rebuildRoute();
+    return true;
+}
+
+void TransmissionSession::rebuildRoute() {
+    const QVariantList route = m_state.value("route").toList();
+    QVariantList nodes;
+    QString packet = m_state.value("senderPacket").toString();
+    for (int i = 0; i < route.size(); ++i) {
+        const int node = route[i].toInt();
+        const QString input = packet;
+        if (m_edits.contains(node)) {
+            const NodeEdit &edit = m_edits[node];
+            const auto decoded = QByteArray::fromBase64Encoding(packet.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
+            const bool binary = edit.binary && decoded;
+            QByteArray bytes = binary ? *decoded : packet.toUtf8();
+            // If upstream damaged Base64 syntax, replay the corresponding raw edits
+            // without silently discarding the invalid characters.
+            const auto &changes = edit.binary && !binary ? edit.rawChanges : edit.changes;
+            // Apply from the end so insertions/deletions preserve the recorded byte offsets.
+            for (auto it = changes.crbegin(); it != changes.crend(); ++it) {
+                const int offset = qMin(it->offset, int(bytes.size()));
+                bytes.replace(offset, qMin(it->removed, int(bytes.size()) - offset), it->replacement);
+            }
+            packet = binary ? QString::fromLatin1(bytes.toBase64()) : QString::fromUtf8(bytes);
+        }
+        nodes.append(QVariantMap{{"node", node}, {"inputPacket", input}, {"outputPacket", packet},
+                                 {"attacked", m_edits.contains(node)},
+                                 {"changed", packet != m_state.value("senderPacket").toString()}});
+    }
+    m_state["nodeStates"] = nodes;
+    m_state["wirePacket"] = packet;
+    m_state["receivedPacket"] = packet;
+    m_state["receivedMatchesSender"] = packet == m_state.value("senderPacket").toString();
+    m_state["tampered"] = !m_edits.isEmpty();
+    m_state["hop"] = route.size() - 1;
+    m_state["currentNode"] = route.last();
+    m_state["phase"] = "received";
+    m_state["matchesOriginal"] = false;
+    m_receiverTrace.clear();
+    decrypt(m_receiverKey);
+}
+
+QList<TransmissionSession::Edit> TransmissionSession::packetEdits(const QByteArray &before, const QByteArray &after) {
+    QList<Edit> edits;
+    if (before.size() == after.size()) {
+        for (int i = 0; i < before.size(); ++i)
+            if (before[i] != after[i]) edits.append({i, 1, after.mid(i, 1)});
+        return edits;
+    }
+    std::function<void(QByteArray, QByteArray, int)> diff = [&](QByteArray a, QByteArray b, int base) {
+        int prefix = 0, suffix = 0;
+        while (prefix < qMin(a.size(), b.size()) && a[prefix] == b[prefix]) ++prefix;
+        a.remove(0, prefix); b.remove(0, prefix); base += prefix;
+        while (suffix < qMin(a.size(), b.size()) && a[a.size()-1-suffix] == b[b.size()-1-suffix]) ++suffix;
+        a.chop(suffix); b.chop(suffix);
+        if (a.isEmpty() || b.isEmpty()) {
+            if (a != b) edits.append({base, int(a.size()), b});
+            return;
+        }
+        const auto split = diffBoundary(a, b);
+        if (split.first < 0 || (split.first == 0 && split.second == 0)
+            || (split.first == a.size() && split.second == b.size())) {
+            edits.append({base, int(a.size()), b});
+            return;
+        }
+        diff(a.left(split.first), b.left(split.second), base);
+        diff(a.mid(split.first), b.mid(split.second), base + split.first);
+    };
+    diff(before, after, 0);
+    return edits;
 }

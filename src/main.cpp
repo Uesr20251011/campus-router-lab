@@ -95,19 +95,15 @@ int main(int argc, char *argv[]) {
                     message->setProperty("text", QStringLiteral("今晚 20:00 开放实验室，通行口令 7391。"));
                 if (state != QStringLiteral("secure-input")) QMetaObject::invokeMethod(window, "sendSecure");
                 auto *channel = qobject_cast<TransmissionSession *>(secureService.channel());
-                if (state == QStringLiteral("secure-input")) {
-                    // Keep the editable first step visible for the preview.
-                } else if (state != QStringLiteral("secure-transit")) {
-                    channel->advance();
-                    if (state == QStringLiteral("secure-tamper") || state == QStringLiteral("secure-flow-fail")) channel->tamper();
-                    if (state != QStringLiteral("secure-intercept")) {
-                        channel->forward();
-                        while (channel->state().value("phase") == "transit") channel->advance();
-                        QMetaObject::invokeMethod(window, "decryptSecure");
-                    }
-                } else {
-                    window->setProperty("secureProgress", 0.5);
+                if (state == QStringLiteral("secure-tamper") || state == QStringLiteral("secure-flow-fail")) {
+                    QByteArray bytes = QByteArray::fromBase64(channel->state().value("senderPacket").toString().toLatin1());
+                    bytes[bytes.size()-1] = char(bytes.back() ^ 1);
+                    channel->editNode(channel->state().value("route").toList()[1].toInt(), QString::fromLatin1(bytes.toBase64()));
                 }
+                if (state == QStringLiteral("secure-intercept") || state == QStringLiteral("secure-tamper"))
+                    QMetaObject::invokeMethod(window, "chooseNode", Q_ARG(QVariant, channel->state().value("route").toList()[1]));
+                else if (state == QStringLiteral("secure") || state == QStringLiteral("secure-plain"))
+                    QMetaObject::invokeMethod(window, "chooseNode", Q_ARG(QVariant, channel->state().value("target")));
                 window->setProperty("secureRunning", false);
                 if (state.startsWith(QStringLiteral("secure-flow")) || state == QStringLiteral("secure-aes")) {
                     if (QObject *panel = window->findChild<QObject *>(QStringLiteral("securePanel")))

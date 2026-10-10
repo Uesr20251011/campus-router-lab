@@ -9,10 +9,8 @@ Item {
     property string algorithm: ""
     property var secureState: ({})
     property var secureRoute: []
-    property int secureObserver: -1
     property int secureSender: -1
     property int secureReceiver: -1
-    property real secureProgress: 0
     property bool treeOnly: false
     property string metric: "cost"
     property string tool: "select"
@@ -42,7 +40,6 @@ Item {
     signal linkRequested(int fromId, int toId)
     signal nodeContextRequested(int id, real x, real y)
     signal positionsSettled(var positions)
-    signal packetInspectRequested()
 
     readonly property bool secureCompact: algorithm === "secure" && height < 130
     readonly property real secureVerticalFactor: algorithm === "secure"
@@ -112,15 +109,6 @@ Item {
                 (!link.directed && link.v === secureRoute[i] && link.u === secureRoute[i + 1])) return i
         }
         return -1
-    }
-    function securePoint() {
-        if (!secureRoute.length) return Qt.point(-200, -200)
-        const hop = Math.min(secureRoute.length - 1, secureState.hop || 0)
-        const a = nodeCenter(secureRoute[hop])
-        const b = nodeCenter(secureRoute[Math.min(hop + 1, secureRoute.length - 1)])
-        const t = secureState.phase === "transit" ? secureProgress : 0
-        return Qt.point(graphLayer.x + (a.x + (b.x - a.x) * t) * root.viewScale,
-                        graphLayer.y + (a.y + (b.y - a.y) * t) * root.viewScale)
     }
     function activeRoute() {
         if (step.pathNodes && step.pathNodes.length > 1) return step.pathNodes
@@ -350,8 +338,8 @@ Item {
                     const exploringPath = root.step.kind === "search" ||
                                           (root.algorithm === "dijkstra" && root.step.kind === "consider")
                     const secureSegment = root.algorithm === "secure" ? root.secureSegment(link) : -1
-                    const secureTone = secureSegment < (root.secureState.hop || 0) ? "#58B09C"
-                                     : secureSegment === (root.secureState.hop || 0) && root.secureState.phase === "transit" ? root.secureState.tampered ? "#CB7E79" : "#699DCE" : "#C0D4E8"
+                    const upstreamState = (root.secureState.nodeStates || [])[secureSegment] || ({})
+                    const secureTone = upstreamState.changed ? "#CB7E79" : "#58B09C"
                     const tone = root.algorithm === "secure" && onPath ? secureTone : exhausted ? "#AEB8C8" : selected ? "#7A66D8" : onPath
                         ? (exploringPath ? "#EAA668" : "#50BDA7")
                         : active ? "#F0B477" : rejected ? "#E693A4" : chosen ? "#68C1AC"
@@ -493,8 +481,9 @@ Item {
                 id: nodeBody
                 property int nodeId: modelData.id
                 visible: !root.secureCompact || root.secureRoute.indexOf(nodeId) >= 0
-                property string secureRole: root.algorithm !== "secure" ? "" : nodeId === root.secureSender ? "发送端" : nodeId === root.secureReceiver ? "接收端" : nodeId === root.secureObserver ? "观察节点" : ""
-                property color secureTone: nodeId === root.secureSender ? "#6997CB" : nodeId === root.secureReceiver ? "#58AE98" : "#D5A168"
+                readonly property var secureNodeState: (root.secureState.nodeStates || []).find(n => n.node === nodeId) || ({})
+                property string secureRole: root.algorithm !== "secure" || root.secureRoute.indexOf(nodeId) < 0 ? "" : nodeId === root.secureSender ? "发送端" : nodeId === root.secureReceiver ? root.secureState.phase === "rejected" ? "校验失败" : "接收端" : secureNodeState.attacked ? "攻击节点" : "中间节点"
+                property color secureTone: secureNodeState.attacked || (nodeId === root.secureReceiver && root.secureState.phase === "rejected") ? "#CB6E79" : nodeId === root.secureSender ? "#6997CB" : "#58AE98"
                 property bool inPath: root.has(root.step.pathNodes, nodeId)
                 property bool visited: root.has(root.step.visitedNodes, nodeId)
                 property bool searchingFlow: root.algorithm === "flow" && root.step.kind === "search"
@@ -519,13 +508,13 @@ Item {
                 Rectangle {
                     anchors.centerIn: parent
                     width: 75; height: 75; radius: 38
-                    color: nodeBody.secureRole.length ? "#156A9CC8" : nodeBody.inPath ? (nodeBody.searchingFlow || nodeBody.consideringPath ? "#29EAA668" : root.algorithm === "flow" || root.algorithm === "dijkstra" || root.algorithm === "secure" ? "#2950BDA7" : "#298D77E0")
+                    color: nodeBody.secureRole.length ? root.selectedNode === nodeBody.nodeId ? "#3879A9DC" : "#156A9CC8" : nodeBody.inPath ? (nodeBody.searchingFlow || nodeBody.consideringPath ? "#29EAA668" : root.algorithm === "flow" || root.algorithm === "dijkstra" || root.algorithm === "secure" ? "#2950BDA7" : "#298D77E0")
                                            : root.selectedNode === nodeBody.nodeId || nodeBody.edgeFocused ? "#267BCBB9" : "transparent"
                 }
                 Rectangle {
                     anchors.fill: parent
                     radius: 31
-                    color: nodeBody.secureRole.length ? nodeBody.nodeId === root.secureSender ? "#E9F2FF" : nodeBody.nodeId === root.secureReceiver ? "#E7F8F0" : "#FFF2DF" : nodeBody.inPath ? (nodeBody.searchingFlow || nodeBody.consideringPath ? "#FFF0DB" : root.algorithm === "flow" || root.algorithm === "dijkstra" || root.algorithm === "secure" ? "#D8F7ED" : "#E7DFFF")
+                    color: nodeBody.secureRole.length ? nodeBody.nodeId === root.secureSender ? "#E9F2FF" : nodeBody.secureNodeState.attacked || (nodeBody.nodeId === root.secureReceiver && root.secureState.phase === "rejected") ? "#FFF0F1" : "#E7F8F0" : nodeBody.inPath ? (nodeBody.searchingFlow || nodeBody.consideringPath ? "#FFF0DB" : root.algorithm === "flow" || root.algorithm === "dijkstra" || root.algorithm === "secure" ? "#D8F7ED" : "#E7DFFF")
                                            : nodeBody.visited ? "#D8F5EB" : root.selectedNode === nodeBody.nodeId || nodeBody.edgeFocused ? "#DDF5ED" : "#FFFFFF"
                     border.width: nodeBody.secureRole.length || root.selectedNode === nodeBody.nodeId || nodeBody.inPath || nodeBody.edgeFocused ? 3 : 2
                     border.color: nodeBody.secureRole.length ? nodeBody.secureTone : nodeBody.inPath ? (nodeBody.searchingFlow || nodeBody.consideringPath ? "#EAA668" : root.algorithm === "flow" || root.algorithm === "dijkstra" || root.algorithm === "secure" ? "#50BDA7" : "#9B84E3")
@@ -639,28 +628,6 @@ Item {
                 running: routeBead.visible
             }
         }
-    }
-
-    Rectangle {
-        id: securePacketBadge
-        objectName: "secureMovingPacket"
-        readonly property point location: root.securePoint()
-        visible: root.algorithm === "secure" && !!root.secureState.packetId
-        width: root.secureCompact ? 120 : 164; height: root.secureCompact ? 28 : 44; radius: 10
-        x: Math.max(4, Math.min(root.width - width - 4, location.y < 84 ? location.x + width + 54 < root.width ? location.x + 48 : location.x - width - 48 : location.x - width / 2))
-        y: Math.max(4, Math.min(root.height - height - 4, location.y - 76))
-        color: "#FFFFFF"
-        border.width: 2
-        border.color: root.secureState.tampered ? "#D08A82" : root.secureState.phase === "intercepted" ? "#DAA46C" : "#7FA5D0"
-        Column {
-            anchors.centerIn: parent; spacing: 2
-            Text {
-                text: "包 #" + String(root.secureState.packetId || 0).padStart(3, "0") + " · " + (root.secureState.tampered ? "已篡改" : root.secureState.encrypted ? "密文" : "明文")
-                font.pixelSize: 11; font.weight: Font.DemiBold; color: "#45627F"
-            }
-            Text { visible: !root.secureCompact; text: (root.secureState.wirePacket || "").slice(0, 16) + "…"; font.family: "Consolas"; font.pixelSize: 10; color: "#8A9BB0" }
-        }
-        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.packetInspectRequested() }
     }
 
     Text {

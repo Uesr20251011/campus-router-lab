@@ -40,7 +40,7 @@ private:
     }
 
 private slots:
-    void securePacketTracksResizingWithoutChangingNodeCoordinates() {
+    void securePathTracksResizingWithoutChangingNodeCoordinates() {
         QQuickView view;
         prepare(view);
         auto *root = view.rootObject();
@@ -49,16 +49,15 @@ private slots:
         root->setProperty("secureRoute", QVariantList{1, 2});
         root->setProperty("secureState", QVariantMap{{"phase", "transit"}, {"hop", 0},
                           {"packetId", 1}, {"encrypted", true}, {"wirePacket", "abcd"}});
-        root->setProperty("secureProgress", 0.5);
-        auto *packet = root->findChild<QQuickItem *>("secureMovingPacket");
-        QVERIFY(packet);
+        QVERIFY(!root->findChild<QQuickItem *>("secureMovingPacket"));
         for (const QSize size : {QSize(976, 400), QSize(1200, 500)}) {
             view.resize(size);
             QTest::qWait(220);
-            const QPointF a = node(root, 1)->mapToItem(root, QPointF(31, 31));
-            const QPointF b = node(root, 2)->mapToItem(root, QPointF(31, 31));
-            const QPointF location = packet->property("location").toPointF();
-            QVERIFY(QLineF(location, (a + b) / 2).length() < 1.0);
+            for (int id : {1, 2}) {
+                const QPointF center = node(root, id)->mapToItem(root, QPointF(31, 31));
+                QVERIFY(center.x() > 0 && center.x() < root->width());
+                QVERIFY(center.y() > 0 && center.y() < root->height());
+            }
         }
         QSignalSpy positions(root, SIGNAL(positionsSettled(QVariant)));
         QVERIFY(positions.isValid());
